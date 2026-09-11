@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Stuck field fixtures</title>
+<style>
+:root { color-scheme: light; }
+body { font-family: Inter, system-ui, sans-serif; margin: 0; padding: 24px; background:#FFFEF9; color:#1B1A17; }
+
+/* a daily-schedule card exactly like the user's: h3 title on top, then a
+   3-line stacked meta block. The 3 spans use Tailwind flex-col so each
+   is on its own line. */
+.schedule-card { background:#1F1C16; color:#F5BD63; padding:18px 20px; border-radius:8px; max-width:320px; }
+.schedule-card h3 { font-size:22px; margin:0 0 12px; line-height:1.15; }
+.schedule-card .meta { display:flex; flex-direction:column; font-size:14px; }
+.schedule-card .meta span { line-height:1.5; }
+
+/* a hover-swap button. CSS DOES NOT use display:none — only opacity &
+   transform. My current detector only looks for display:none / visibility:hidden /
+   opacity:0, so it WILL mis-classify this as multiple editable fields. */
+.swap-btn { position:relative; display:inline-flex; align-items:center; padding:10px 18px;
+  border:1px solid #1B1A17; border-radius:999px; background:#fff; color:#1B1A17; overflow:hidden;
+  height:40px; min-width:170px; }
+.swap-btn .hover { position:absolute; left:18px; top:50%; transform:translateY(-50%);
+  opacity:0; transition:opacity .25s; pointer-events:none; }
+.swap-btn:hover .rest { opacity:0; transition:opacity .25s; }
+.swap-btn:hover .hover { opacity:1; }
+
+/* a button whose two spans share the same font/color/styling — also a swap. */
+.swap-btn2 { display:inline-block; padding:10px 18px; background:#F5BD63; color:#1B1A17;
+  border-radius:6px; font-weight:600; }
+.swap-btn2 .alt { margin-left:6px; opacity:.7; }
+</style>
+</head>
+<body>
+  <header><h1>Stacked + hover-swap fixtures</h1></header>
+
+  <section id="schedule">
+    <h2>Weekly Schedule</h2>
+    <p>Click any card to edit it.</p>
+    <div class="cards">
+      <div class="schedule-card">
+        <h3>12:00 Beginner Yoga</h3>
+        <div class="meta">
+          <span>12:00</span>
+          <span>Beginner Yoga</span>
+          <span>Maya</span>
+        </div>
+      </div>
+      <div class="schedule-card">
+        <h3>09:00 Sunrise Vinyasa</h3>
+        <div class="meta">
+          <span>09:00</span>
+          <span>Sunrise Vinyasa Flow</span>
+          <span>Emma</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="cta">
+    <h2>Online booking</h2>
+    <a href="book.html" class="swap-btn">
+      <span class="rest">Online book</span>
+      <span class="hover">Online booking</span>
+    </a>
+    &nbsp;&nbsp;
+    <a href="learn.html" class="swap-btn2">
+      Browse <span class="alt">all classes</span>
+    </a>
+  </section>
+</body>
+</html>

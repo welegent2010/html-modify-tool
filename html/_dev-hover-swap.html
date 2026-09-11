@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>hover-swap regression</title>
+<style>
+body{font:14px/1.5 system-ui,sans-serif;margin:0;padding:24px;background:#fff;color:#222}
+section{padding:14px 0;border-bottom:1px solid #ddd}
+section h2{font-size:14px;letter-spacing:.1em;text-transform:uppercase;color:#888;margin:0 0 8px}
+
+/* hover-swap that uses position+transform (NOT opacity:0) — the case the
+   old "stackedTextBlocks" detector missed and left a stale second label. */
+.btn{position:relative;display:inline-flex;align-items:center;padding:10px 18px;
+  border:1px solid #222;border-radius:999px;background:#fff;color:#222;overflow:hidden;
+  height:40px;min-width:180px}
+.btn .b{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  transition:opacity .2s}
+.btn .b.rest{opacity:1}
+.btn .b.alt{opacity:0}
+.btn:hover .b.rest{opacity:0}
+.btn:hover .b.alt{opacity:1}
+
+/* a hover-swap that uses opacity:0 (the case the old detector caught) */
+.btn2{display:inline-block;padding:8px 16px;border:1px solid #222;border-radius:6px;
+  position:relative;overflow:hidden;height:36px;min-width:160px}
+.btn2 .b{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}
+.btn2 .b.rest{opacity:1}
+.btn2 .b.alt{opacity:0}
+.btn2:hover .b.rest{opacity:0}
+.btn2:hover .b.alt{opacity:1}
+
+/* a normal stacked-field card (should remain 2 separate items) */
+.card{background:#f0eee0;padding:14px;margin:14px 0;border-radius:6px;max-width:280px}
+.card .meta{display:flex;flex-direction:column;font-size:13px}
+.card .meta span{line-height:1.5}
+</style>
+</head>
+<body>
+
+<section id="swap-transform">
+  <h2>A. transform-based hover-swap</h2>
+  <a href="x.html" id="b1" class="btn"><span class="b rest">Online book</span><span class="b alt">Online booking</span></a>
+</section>
+
+<section id="swap-opacity">
+  <h2>B. opacity-based hover-swap</h2>
+  <a href="y.html" id="b2" class="btn2"><span class="b rest">Reserve</span><span class="b alt">Book now</span></a>
+</section>
+
+<section id="stacked">
+  <h2>C. stacked-field card (must stay split)</h2>
+  <div class="card" id="card1">
+    <div class="meta"><span>60 Mins</span><span>All Levels</span></div>
+  </div>
+</section>
+
+</body>
+</html>

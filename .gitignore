@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+._*
+
+# Editors / OS scratch
+*.swp
+*~
+Thumbs.db
+
+# Editor runtime exports — never commit user output
+output/*
+!output/.gitkeep
+
+# User-imported site material — keep the directory in git, ignore its contents
+html/site-files/*
+!html/site-files/.gitkeep
+
+# Node / Playwright (for the developer-only regression suite)
+node_modules/

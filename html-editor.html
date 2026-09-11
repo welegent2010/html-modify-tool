@@ -1,0 +1,2086 @@
+<!DOCTYPE html>
+<!--
+  html-editor v6.4 — 2026-09-11 — single-file visual HTML editor
+  DO NOT EDIT WITHOUT A BACKUP. See README.md.
+  Architecture:
+    - iframe srcdoc for real <script>/<link>/<web-component> execution
+    - body-direct-child section model with own-items / cards split
+    - click does not navigate (capture-phase preventDefault)
+    - debounced localStorage autosave; export = file download + clipboard
+    - indicator rows ("Seats ●●○○") detected from computed background
+      colour and driven by a small lit-count control
+    - COLLAPSED FIELD CHIPS: every editable field renders as one compact
+      row (type badge · short preview · chevron). Its editor (CURRENT
+      block + inputs + meter) only exists after the user clicks the chip,
+      so a 27-item header is 27 tidy rows instead of 27 open forms.
+      Exactly one field is open at a time.
+  v6.4 — the "密集恐惧症" fix. ownItems used to be dumped straight into
+    the right rail as a stack of open editors (header sections hit 27
+    inputs at once). Each ownItem is now a collapsed chip that expands
+    on click; the same collapse applies inside a focused card. Switching
+    chips closes the previous one.
+  v6.5 — hover-swap rewrite. setTextPreserving() used to detect "this is
+    one label, not a field stack" by checking display:none /
+    visibility:hidden / opacity:0. Real Squarespace / Tailwind buttons
+    use transform / position:absolute / translate to swap the label —
+    neither style hides the second span at rest. Old behaviour: write
+    goes to the first text node and either (a) leaves the second copy
+    visible (the "写进去的字和先前默认的字同时存在" bug), or (b) empties
+    the second span and leaves an empty <span></span> in the export.
+    New behaviour: when two text children share an overlapping bounding
+    rectangle, rewrite every one of them. Any element child that ends
+    up empty after a text-node removal is also dropped, so the export
+    stays byte-clean. Plain Enter in the paste drawer now renders too
+    (it was only wired to Cmd/Ctrl+Enter before).
+  v6.5 also fixed a section-root scan: when the section's direct body
+    child IS an <a> or <button> (a floating "Book a Class" pill with no
+    wrapping <section>), scanSection used to iterate that link's text
+    children and expose each span as a separate item — which split a
+    hover-swap into two unrelated chips. The section root is now scanned
+    directly in that case.
+  v6.6 — "改文字不能改排版". Three defects, one theme: editing a label used
+    to reflow the page.
+    (1) MULTI-LINE LABELS WERE HALF-DELETED. The logo <a> wraps
+        <div class="flex flex-col"><span>SAMA</span><span>Yoga Studio</span>
+        </div> — a two-line stacked label one level deeper than the old
+        stackedTextBlocks() looked. It scored "1 line", so it was treated as
+        one run: typing a space rewrote the first text node and DELETED
+        "Yoga Studio", collapsing the logo onto one line in a different font.
+        stackedTextBlocks() is now recursive (a wrapper holding the stack is
+        followed), and scan() splits such a link/button into one TEXT item
+        per styled line, leaving the action item with the URL only.
+    (2) <br> INSIDE A LABEL. The hero <h1> is "Breathe. Move. <br>Return to
+        center." — two text nodes, one hard break. The writer replaced the
+        first node and removed the second but kept the <br>, so the break
+        moved to the end of the text. When every text node is a direct child
+        of the element the label is ONE run broken by <br>: the run is
+        replaced and the breaks that separated it go with it.
+    (3) NO LENGTH LIMIT. Any longer text widened its box and pushed the rest
+        of the row (the nav links all slid left, the header spacing changed).
+        Every text/action input now carries a measured maxlength — how many
+        characters fit in the box the element already occupies, plus the free
+        width of its own container, capped at 20 for links/buttons. The chip
+        shows "n / max"; the browser refuses the extra keystroke, so nothing
+        moves. No CSS is ever written.
+  v6.3 fix: isTextLeaf() used to decide "one editable run of text" from TAG
+    NAMES alone. A card whose fields are all <span> (a timetable slot:
+    <span>09:00</span><span>Vinyasa Flow</span><span>Maya</span> laid out
+    with display:block, or the Tailwind "flex flex-col" meta row
+    <span>60 Mins</span><span>All Levels</span>) therefore looked like ONE
+    text leaf. The panel showed "09:00Vinyasa FlowMaya" as a single value,
+    and typing a space overwrote the first text node and DELETED the other
+    two — three styled lines collapsed into one, inheriting the first
+    line's font. It now also looks at LAYOUT: two or more visible text
+    blocks each on their own line make the element a container, so each
+    field becomes its own item. A hover-swap pair has only one block
+    visible at rest, so it stays one item.
+    The same change makes real page fields editable on their own:
+    "60 Mins" / "All Levels", "$120" / "/ session", "Day" / "01".
+    setTextPreserving() gained a matching safety net: when several text
+    blocks sit on separate lines it edits only the first and never merges
+    or deletes the rest. Text items are now a single-line <input> so a long
+    value scrolls instead of growing the field.
+  v6.1 fix: setTextPreserving() used to treat <span>/<b>/<em> as "keep"
+    children, so any label living inside a span (hover-swap buttons like
+    <a><span>Explore Class</span><span>Explore Classes</span></a>, or
+    <div><span>19:30</span><span>Slow Flow</span></div>) had its new value
+    PREPENDED instead of replacing — old + new text both stayed. It now
+    writes into the first text node of the subtree and drops the rest,
+    so exactly one copy of the label survives.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HTML Modify Tool</title>
+<style>
+  :root{
+    --bg:#121110; --panel:#181614; --line:#2C2926; --gold:#F5BD63;
+    --muted:#9A9186; --text:#F3EEE6; --field:#111; --chip:#2A2724;
+    --ro:#141312;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:Verdana,Geneva,sans-serif; font-size:12px;
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+
+  /* ---------- top bar ---------- */
+  .top{display:flex;align-items:center;gap:10px;padding:0 16px;height:52px;border-bottom:1px solid var(--line);flex:0 0 auto}
+  .top h1{margin:0;font-size:11.5px;letter-spacing:.16em;font-weight:500;white-space:nowrap}
+  .top .divider{width:1px;height:20px;background:var(--line)}
+  .top .filename{font-size:11px;color:var(--muted);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .spacer{flex:1}
+  .version{font-size:10px;letter-spacing:.18em;color:var(--gold);font-weight:600;white-space:nowrap}
+  .status{font-size:10px;letter-spacing:.09em;color:var(--muted);white-space:nowrap}
+  .status.dirty{color:var(--gold)}
+
+  button{
+    appearance:none;border:0;cursor:pointer;height:32px;padding:0 12px;
+    background:var(--gold);color:#1A140B;font-size:10.5px;letter-spacing:.1em;
+    font-family:inherit;white-space:nowrap;
+  }
+  button.ghost{background:var(--chip);color:#E4DCD0}
+  button.ghost:hover{background:#353130}
+  button:disabled{opacity:.35;cursor:default}
+
+  /* ---------- paste drawer ---------- */
+  .drawer{flex:0 0 auto;border-bottom:1px solid var(--line);background:#151312}
+  .drawer.collapsed{display:none}
+  .drawer-inner{padding:14px 16px}
+  .drawer-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .drawer-head .lb{font-size:10px;letter-spacing:.14em;color:var(--muted)}
+  textarea.paste{
+    width:100%;height:110px;background:var(--field);border:1px solid #333;color:#EFE9DF;
+    padding:10px;font:11.5px/1.55 ui-monospace,Menlo,Consolas,monospace;resize:vertical;
+  }
+  .drawer-actions{display:flex;gap:8px;margin-top:8px;align-items:center}
+  .note{color:var(--muted);font-size:10.5px;line-height:1.5}
+
+  /* ---------- layout ---------- */
+  .layout{flex:1;display:grid;grid-template-columns:1fr 372px;min-height:0}
+  .stage{position:relative;background:#0D0C0B;min-width:0}
+  iframe.frame{width:100%;height:100%;border:0;display:block;background:#fff}
+
+  .stage-empty{
+    position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;text-align:center;padding:40px;pointer-events:none;
+  }
+  .stage-empty .big{font:500 26px/1.3 Georgia,serif;color:#4C463F}
+  .stage-empty .small{font-size:11px;color:#3E3833;letter-spacing:.08em;line-height:1.8}
+  .stage.drop{outline:2px dashed var(--gold);outline-offset:-10px}
+
+  /* ---------- right panel ---------- */
+  .panel{border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0}
+  .panel-head{flex:0 0 auto;padding:14px 14px 12px;border-bottom:1px solid var(--line)}
+  .panel-head h2{margin:0 0 10px;font-size:11px;letter-spacing:.14em;font-weight:500}
+  .sec-strip{display:flex;flex-wrap:wrap;gap:6px;max-height:118px;overflow:auto}
+  .sec{
+    background:var(--chip);color:#CFC6BA;border:0;height:26px;padding:0 9px;cursor:pointer;
+    font-size:10px;letter-spacing:.05em;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .sec.on{background:var(--gold);color:#1A140B}
+  .sec .n{opacity:.55;margin-left:5px}
+  .panel-body{flex:1;overflow:auto;padding:14px 14px 60px}
+  .panel-empty{color:var(--muted);font-size:11.5px;line-height:1.65}
+
+  .sec-title{
+    display:flex;align-items:baseline;justify-content:space-between;gap:8px;
+    margin:0 0 12px;padding-bottom:9px;border-bottom:1px solid var(--line);
+  }
+  .sec-title b{font:500 15px/1.3 Georgia,serif;color:#EFE9DF;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sec-title span{font-size:9.5px;letter-spacing:.12em;color:var(--muted);white-space:nowrap}
+
+  /* ---------- field chip (v6.4: ownItems collapsed by default) ----------
+     A field is a single collapsible row. The whole row is a button; the
+     editor (CURRENT block + inputs + meter) only renders when the user
+     clicks. Keeps a 27-item section legible without scrolling past
+     77 inputs. */
+  .field{border:1px solid var(--line);background:#161513;margin-bottom:7px}
+  .field.on{border-color:#6A5A32}
+  .field-chip{
+    appearance:none;border:0;padding:0;margin:0;display:grid;
+    grid-template-columns:54px 1fr 16px;align-items:center;gap:9px;
+    width:100%;min-height:34px;padding:6px 10px;text-align:left;
+    background:transparent;color:#DDD4C8;cursor:pointer;
+    font-family:inherit;font-size:11.5px;
+  }
+  .field-chip:hover{background:#1D1A17}
+  .field.on .field-chip{background:#1F1B14}
+  .field-chip .kind{
+    display:inline-block;width:48px;text-align:center;
+    font-size:9.5px;letter-spacing:.14em;color:#1A140B;background:var(--gold);
+    padding:2px 0;line-height:1.4;
+  }
+  .field-chip .kind.k-image{background:#8FB3D9;color:#0E1A26}
+  .field-chip .kind.k-action{background:#B8D98F;color:#1A2A0E}
+  .field-chip .ftxt{
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    font:500 11.5px/1.35 Verdana,Geneva,sans-serif;color:#EFE9DF;
+  }
+  .field-chip .ftxt .empty{color:#5F584F;font-style:normal;font-weight:400}
+  .field-chip .fc-arrow{font-size:10px;color:var(--muted);text-align:center}
+  .field.on .field-chip .fc-arrow{color:var(--gold)}
+  .field-edit{padding:11px 11px 12px;border-top:1px solid var(--line);background:#131211}
+
+  /* legacy class hooks kept so old tests + the body HTML below still style */
+  .item{border:1px solid var(--line);background:#161513;margin-bottom:12px}
+  .item.on{border-color:#6A5A32}
+  .item-h{display:flex;align-items:center;gap:7px;padding:8px 10px;border-bottom:1px solid var(--line)}
+  .kind{font-size:9.5px;letter-spacing:.14em;color:#1A140B;background:var(--gold);padding:2px 6px}
+  .kind.k-image{background:#8FB3D9}
+  .kind.k-action{background:#B8D98F}
+  .item-h .tag{font-size:10px;color:var(--muted);letter-spacing:.06em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+  .item-body{padding:10px}
+
+  label.lb{display:block;font-size:9.5px;letter-spacing:.12em;color:var(--muted);margin:11px 0 5px}
+  .field-edit label.lb:first-child,
+  .item-body label.lb:first-child{margin-top:0}
+  input[type=text],textarea{
+    width:100%;background:var(--field);border:1px solid #333;color:#EFE9DF;
+    padding:8px 9px;font:12px/1.5 Verdana,Geneva,sans-serif;
+  }
+  textarea{min-height:62px;resize:vertical}
+  input[type=text]:focus,textarea:focus{outline:1px solid var(--gold);border-color:var(--gold)}
+
+  .ro{
+    background:var(--ro);border-left:2px solid #3A352F;padding:8px 10px;
+    color:#7E766C;font-size:11.5px;line-height:1.55;word-break:break-word;margin:0 0 4px;
+  }
+  .ro .k{color:#5F584F;font-size:9.5px;letter-spacing:.12em;display:block;margin-bottom:3px}
+  .ro img{max-width:100%;max-height:78px;display:block;margin-top:5px;opacity:.75}
+  .ro a{color:#7E766C;text-decoration:underline}
+
+  .cb{display:flex;align-items:center;gap:7px;font-size:11px;color:#B9B0A5;margin:11px 0 0;cursor:pointer}
+  .cb input{width:14px;height:14px;accent-color:var(--gold);margin:0}
+
+  /* ---------- card navigation (shown under a section's own items) ---------- */
+  .card-nav-h{
+    font-size:9.5px;letter-spacing:.16em;color:var(--muted);
+    margin:18px 0 9px;padding-top:14px;border-top:1px solid var(--line);
+  }
+  .card-nav-h span{color:#5F584F;letter-spacing:.06em}
+  .card-nav{display:flex;flex-direction:column;gap:6px}
+  .card-chip{
+    display:grid;grid-template-columns:22px 1fr auto;align-items:center;gap:8px;
+    width:100%;height:auto;min-height:34px;padding:6px 10px;text-align:left;
+    background:#1B1917;color:#DDD4C8;border:1px solid var(--line);cursor:pointer;
+    font-family:inherit;font-size:11px;
+  }
+  .card-chip:hover{background:#232120;border-color:#4A4136}
+  .card-chip .ci{
+    font-size:9.5px;color:var(--gold);letter-spacing:.04em;
+    text-align:center;border-right:1px solid var(--line);padding-right:6px;
+  }
+  .card-chip .cl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .card-chip .cn{font-size:9.5px;color:var(--muted)}
+
+  /* ---------- focused card panel ---------- */
+  .sec-title.card-head{gap:10px}
+  .back-btn{
+    appearance:none;border:1px solid var(--line);background:transparent;
+    color:var(--gold);height:24px;padding:0 9px;cursor:pointer;
+    font-size:9.5px;letter-spacing:.12em;font-family:inherit;white-space:nowrap;
+  }
+  .back-btn:hover{background:#241F17;border-color:#4A3F2B}
+  .card-sub{
+    margin:-4px 0 13px;font-size:11px;color:var(--muted);
+    line-height:1.5;word-break:break-word;
+  }
+
+  /* ---------- indicator row (e.g. "Seats ●●○○") ---------- */
+  .meter{margin:12px 0 0;border:1px solid var(--line);background:#141312;padding:10px 11px 11px}
+  .meter-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 9px}
+  .meter-h .k{font-size:9.5px;letter-spacing:.14em;color:var(--gold)}
+  .meter-h .v{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .meter-bars{display:flex;gap:6px}
+  .meter-bar{
+    appearance:none;border:0;padding:0;height:11px;flex:1;max-width:46px;
+    border-radius:99px;background:#3B352F;cursor:pointer;
+    transition:background .12s ease,box-shadow .12s ease;
+  }
+  .meter-bar.on{background:var(--gold)}
+  .meter-bar:hover{box-shadow:0 0 0 2px rgba(245,189,99,.35)}
+  .meter-note{margin:9px 0 0;font-size:10px;color:#6E665C;line-height:1.55}
+  .meter-qs{display:inline-block;margin-top:3px}
+  .meter-q{
+    appearance:none;border:0;background:none;padding:0;font:inherit;
+    color:var(--gold);cursor:pointer;text-decoration:underline;text-underline-offset:2px;
+  }
+
+  /* ---------- toast ---------- */
+  .toast{
+    position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);
+    background:#241F17;color:#EFE9DF;border:1px solid #4A3F2B;
+    padding:11px 18px;font-size:11.5px;letter-spacing:.04em;opacity:0;
+    transition:opacity .18s,transform .18s;pointer-events:none;z-index:99;max-width:70vw;
+  }
+  .toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast.err{background:#2A1616;border-color:#6A3030}
+
+  @media (max-width:1080px){
+    .layout{grid-template-columns:1fr}
+    .panel{border-left:0;border-top:1px solid var(--line);max-height:52vh}
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <h1>HTML MODIFY TOOL</h1>
+  <div class="divider"></div>
+  <span class="filename" id="filename">no file</span>
+  <div class="spacer"></div>
+  <span class="version" id="version">v6.6</span>
+  <span class="status" id="status">READY</span>
+  <div class="divider"></div>
+  <button class="ghost" id="btnPaste" type="button">PASTE</button>
+  <button class="ghost" id="btnOpen" type="button">OPEN FILE</button>
+  <button id="btnExport" type="button" disabled>EXPORT</button>
+  <button class="ghost" id="btnReset" type="button" disabled>RESET</button>
+  <input type="file" id="fileInput" accept=".html,.htm,text/html" hidden />
+</header>
+
+<section class="drawer collapsed" id="drawer">
+  <div class="drawer-inner">
+    <div class="drawer-head"><span class="lb">PASTE HTML — SQUARESPACE CODE BLOCK OR FULL PAGE</span></div>
+    <textarea class="paste" id="pasteInput" placeholder="Paste your HTML here, then press RENDER.&#10;&#10;Tailwind classes, iconify icons and background images render exactly like the browser does."></textarea>
+    <div class="drawer-actions">
+      <button id="btnRender" type="button">RENDER</button>
+      <button class="ghost" id="btnPasteClear" type="button">CLEAR</button>
+      <div class="spacer"></div>
+      <span class="note">A bare fragment is wrapped with Tailwind + iconify so it renders as a real card.</span>
+    </div>
+  </div>
+</section>
+
+<div class="layout">
+  <div class="stage" id="stage">
+    <div class="stage-empty" id="stageEmpty">
+      <div class="big">Nothing loaded yet</div>
+      <div class="small">OPEN FILE &nbsp;·&nbsp; drag an .html here &nbsp;·&nbsp; or PASTE<br />Then click anything on the page to edit its text, image or link.</div>
+    </div>
+    <iframe class="frame" id="frame" title="preview"></iframe>
+  </div>
+
+  <aside class="panel">
+    <div class="panel-head">
+      <h2>SECTIONS</h2>
+      <div class="sec-strip" id="secStrip"></div>
+    </div>
+    <div class="panel-body" id="panelBody">
+      <p class="panel-empty">Load a page, then click any block on the left — or a section chip above. Click a section's blank area to edit its heading, text, buttons and images. Click a card inside it to edit just that card.</p>
+    </div>
+  </aside>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   state
+   ============================================================ */
+const KEY = "htmlModifyTool_v4";
+const HILITE_ID = "__hilite";
+const INJ_PREFIX = "__inj";
+
+let MODE = "file";        // "file" | "paste"
+let NAME = "";
+let ORIGINAL = "";        // html as first loaded (for RESET)
+let INJECTED = [];        // ids of nodes we injected (paste mode only)
+
+let SECTIONS = [];        // [{ el, name, ownItems, cards:[{el,container,items}], key }]
+let ACTIVE = null;        // active section
+let VIEW = "own";         // "own" | "card"
+let ACTIVE_CARD = null;   // active card element (VIEW === "card")
+let ACTIVE_ITEM = null;   // active element (within current view)
+let hoverEl = null;
+
+let saveTimer = null;
+let loadToken = 0;
+let booted = new WeakSet();   // documents we already wired up
+
+const frame      = document.getElementById("frame");
+const stage      = document.getElementById("stage");
+const stageEmpty = document.getElementById("stageEmpty");
+const secStrip   = document.getElementById("secStrip");
+const panelBody  = document.getElementById("panelBody");
+const drawer     = document.getElementById("drawer");
+const pasteInput = document.getElementById("pasteInput");
+const filenameEl = document.getElementById("filename");
+const statusEl   = document.getElementById("status");
+const toastEl    = document.getElementById("toast");
+const fileInput  = document.getElementById("fileInput");
+
+/* ============================================================
+   helpers
+   ============================================================ */
+function esc(s){
+  return String(s == null ? "" : s).replace(/[&<>"]/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[m]));
+}
+function toast(msg, err){
+  toastEl.textContent = msg;
+  toastEl.classList.toggle("err", !!err);
+  toastEl.classList.add("on");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => toastEl.classList.remove("on"), 2600);
+}
+function setStatus(text, dirty){
+  statusEl.textContent = text;
+  statusEl.classList.toggle("dirty", !!dirty);
+}
+function nowStamp(){
+  const t = new Date(), p = n => String(n).padStart(2, "0");
+  return p(t.getHours()) + ":" + p(t.getMinutes()) + ":" + p(t.getSeconds());
+}
+function dateStamp(){
+  const t = new Date(), p = n => String(n).padStart(2, "0");
+  return t.getFullYear() + "-" + p(t.getMonth() + 1) + "-" + p(t.getDate());
+}
+
+/* walk up the tree, hopping out of shadow roots (iconify renders in one) */
+function up(el){
+  if (!el) return null;
+  if (el.parentElement) return el.parentElement;
+  const root = el.getRootNode && el.getRootNode();
+  if (root && root.host) return root.host;
+  return null;
+}
+
+/* ============================================================
+   scanning — what is editable, and as what
+   ============================================================ */
+const SKIP = new Set(["SCRIPT","STYLE","LINK","META","NOSCRIPT","TEMPLATE","TITLE","HEAD",
+                      "SVG","PATH","CIRCLE","RECT","G","DEFS","LINEARGRADIENT","STOP",
+                      "VIDEO","AUDIO","SOURCE","CANVAS","IFRAME"]);
+
+/* an element with block-level children is not a "text leaf" */
+const BLOCKISH = new Set(["DIV","P","H1","H2","H3","H4","H5","H6","SECTION","ARTICLE","HEADER",
+  "FOOTER","MAIN","ASIDE","NAV","UL","OL","LI","TABLE","THEAD","TBODY","TR","TD","TH",
+  "BLOCKQUOTE","FIGURE","FIGCAPTION","FORM","FIELDSET","DL","DT","DD","PRE","ADDRESS",
+  "HR","A","BUTTON","IMG","PICTURE","LABEL","DETAILS","SUMMARY"]);
+
+function isInjected(el){
+  if (el.id === HILITE_ID) return true;
+  if (el.id && el.id.indexOf(INJ_PREFIX) === 0) return true;
+  return false;
+}
+function isTextLeaf(el){
+  if (!el.textContent || !el.textContent.trim()) return false;
+  /* collect the direct children that actually carry text */
+  const textKids = [];
+  for (const c of el.children){
+    if (c.tagName === "BR") continue;
+    if (c.tagName.indexOf("ICONIFY") === 0) continue;
+    if (BLOCKISH.has(c.tagName)) return false;
+    if (c.textContent && c.textContent.trim()) textKids.push(c);
+  }
+  /* 0 or 1 text child reads as one run — no style lookup needed */
+  if (textKids.length < 2) return true;
+
+  /* Two or more text-carrying children. Two very different shapes share
+     this markup:
+       (a) a STACK OF FIELDS — <span>09:00</span><span>Vinyasa Flow</span>
+           <span>Maya</span> laid out on separate lines (a timetable slot,
+           a stat block). Each one is its own editable value.
+       (b) a HOVER-SWAP LABEL — <span>Explore Class</span>
+           <span>Explore Classes</span> where CSS hides one of them at rest.
+           This is one label and must stay one item.
+     Tag names are identical, so only LAYOUT tells them apart: two or more
+     VISIBLE blocks each on their own line means (a). */
+  const win = el.ownerDocument.defaultView;
+  let stacked = 0;
+  for (const c of textKids){
+    const cs = win.getComputedStyle(c);
+    if (cs.display === "none" || cs.visibility === "hidden") continue;
+    const d = cs.display;
+    if (d === "block" || d === "flex" || d === "grid" || d === "list-item" ||
+        d === "table" || d === "table-row" || d === "flow-root") stacked++;
+    if (stacked >= 2) return false;
+  }
+  return true;
+}
+
+function scan(el, out){
+  if (!el || el.nodeType !== 1) return;
+  if (SKIP.has(el.tagName)) return;
+  if (isInjected(el)) return;
+
+  if (el.tagName === "IMG"){ out.push({ kind:"image", el }); return; }
+
+  if (el.tagName === "A" || el.tagName === "BUTTON"){
+    /* A link/button whose label is built from SEVERAL stacked lines (the
+       logo <a> wrapping <div class="flex flex-col"><span>SAMA</span>
+       <span>Yoga Studio</span></div>) is NOT one label. Writing the joined
+       text into the first line deletes the other lines and collapses the
+       block — exactly the "SAMA / Yoga Studio becomes one line" bug. Give
+       each styled line its own TEXT item and keep the action item for the
+       URL alone (noText). */
+    const stacked = stackedTextBlocks(el) >= 2;
+    out.push({ kind:"action", el, noText: stacked });
+    el.querySelectorAll("img").forEach(im => { if (!isInjected(im)) out.push({ kind:"image", el:im }); });
+    if (stacked) for (const c of el.children) scan(c, out);
+    return;
+  }
+  if (isTextLeaf(el)){ out.push({ kind:"text", el }); return; }
+  for (const c of el.children) scan(c, out);
+}
+
+function scanAll(root){
+  const out = [];
+  for (const c of root.children) scan(c, out);
+  return out;
+}
+
+/* a section's direct child looks like a "cards container" when it holds
+   2+ structurally-similar children that each contain at least 2 distinct
+   types of editable content (image / heading / link / body text). This is
+   strict enough to ignore 2-column hero layouts where one column is text
+   and the other is a single image, but loose enough to admit real card
+   grids where some cards happen to be text-only. */
+function looksLikeCardsContainer(el){
+  if (!el || !el.children || el.children.length < 2) return false;
+  const kids = [...el.children];
+  const firstTag = kids[0].tagName;
+  if (SKIP.has(firstTag)) return false;
+  if (["NAV","HEADER","FOOTER","ASIDE","FORM","TABLE"].indexOf(firstTag) >= 0) return false;
+  /* children must share the same tag — that's the structural similarity */
+  if (!kids.every(k => k.tagName === firstTag)) return false;
+  /* each child must carry at least two distinct kinds of editable content */
+  return kids.every(k => {
+    let types = 0;
+    if (k.querySelector("img")) types++;
+    if (k.querySelector("h1,h2,h3,h4,h5,h6")) types++;
+    if (k.querySelector("a,button")) types++;
+    if (k.textContent.trim().length > 24) types++;
+    return types >= 2;
+  });
+}
+
+/* Each section carries two independent buckets:
+   - ownItems: the section's own heading / body text / button / image (i.e.
+     everything NOT inside a card grid). This is what the OWN view shows.
+   - cards:    one entry per individual card (not per grid). Clicking a card
+     in the preview or in the card list opens just that card's items. */
+function scanSection(sectionEl){
+  const ownItems = [];
+  const cardsContainers = [];
+
+  /* If the section root IS an action (an <a> or <button> placed directly
+     on the body — common for a "Book a Class" pill that lives outside any
+     wrapper), scan the root itself, not its children. Iterating children
+     would expose every text-bearing descendant as its own field and break
+     a hover-swap pair (the two labels become two items). */
+  if (sectionEl.tagName === "A" || sectionEl.tagName === "BUTTON"){
+    scan(sectionEl, ownItems);
+    return { ownItems, cards: [] };
+  }
+
+  for (const ch of sectionEl.children){
+    if (SKIP.has(ch.tagName)) continue;
+    if (looksLikeCardsContainer(ch)) cardsContainers.push(ch);
+  }
+  for (const ch of sectionEl.children){
+    if (cardsContainers.indexOf(ch) >= 0) continue;
+    scan(ch, ownItems);
+  }
+  const cards = [];
+  for (const cc of cardsContainers){
+    for (const cardEl of cc.children){
+      if (SKIP.has(cardEl.tagName)) continue;
+      const items = [];
+      scan(cardEl, items);
+      if (items.length) cards.push({ el: cardEl, container: cc, items });
+    }
+  }
+  return { ownItems, cards };
+}
+
+function secName(el){
+  const tag = el.tagName.toLowerCase();
+  const cls = (typeof el.className === "string" && el.className.trim())
+    ? "." + el.className.trim().split(/\s+/).slice(0,2).join(".")
+    : "";
+  const h = el.querySelector("h1,h2,h3");
+  const t = h ? h.textContent.trim().replace(/\s+/g," ").slice(0,30) : "";
+  return t || (tag + cls) || tag;
+}
+
+function itemTag(it){ return it.el.tagName.toLowerCase() + (it.el.id ? "#" + it.el.id : ""); }
+
+function itemLabel(it){
+  if (it.kind === "image"){
+    const src = it.el.getAttribute("src") || "";
+    const f = src.replace(/^https?:\/\//, "").split(/[?#]/)[0].split("/").pop();
+    return f ? f.slice(0,30) : "(no src)";
+  }
+  const t = it.el.textContent.trim().replace(/\s+/g," ");
+  if (it.kind === "action"){
+    const href = it.el.getAttribute("href") || (it.el.tagName === "BUTTON" ? "" : "");
+    return (t ? t.slice(0,24) : "(no label)") + (href ? "  →  " + href.slice(0,26) : "");
+  }
+  return t.slice(0,52) || "(empty)";
+}
+
+/* build sections — one per top-level block of the page body.
+   Each section splits its contents into ownItems (titles / text / buttons /
+   images directly inside the section) and cards (a grid of repeating items).
+   The right panel renders those two views separately.
+   NOTE: this is a pure read — it must NOT touch the DOM, because it is also
+   called repeatedly by the growth watcher in boot(). */
+function buildSections(doc){
+  const body = doc.body || doc.documentElement;
+  const secs = [];
+  const tops = [...body.children].filter(ch =>
+    !SKIP.has(ch.tagName) &&
+    !(ch.id && ch.id.indexOf(INJ_PREFIX) === 0) &&
+    (ch.textContent.trim() || ch.querySelector("img"))
+  );
+
+  for (const top of tops){
+    const { ownItems, cards } = scanSection(top);
+    if (!ownItems.length && !cards.length) continue;
+    secs.push({ el:top, ownItems, cards, name:secName(top) });
+  }
+  secs.forEach((s,i) => { s.key = "s" + i; });
+  return secs;
+}
+
+/* Dropping one of our marker classes from an element that carried no class
+   of its own leaves class="" behind — which then shows up in the export as
+   an attribute the user never wrote. Always drop the attribute once empty. */
+function unmask(el, cls){
+  if (!el) return;
+  el.classList.remove(cls);
+  if (!el.getAttribute("class")) el.removeAttribute("class");
+}
+
+function clearMarkers(doc){
+  doc.querySelectorAll(".__edit-on,.__edit-mark,.__edit-hover,.__edit-card").forEach(n => {
+    unmask(n, "__edit-on");
+    unmask(n, "__edit-mark");
+    unmask(n, "__edit-hover");
+    unmask(n, "__edit-card");
+  });
+}
+
+/* ============================================================
+   build the document that goes into the iframe
+   ============================================================ */
+function looksLikeFullDoc(html){ return /<!doctype|<html[\s>]/i.test(html); }
+
+function wrapFragment(frag){
+  INJECTED = [];
+  const hasTw = /cdn\.tailwindcss\.com/.test(frag);
+  const hasIc = /code\.iconify\.design/.test(frag);
+  const p = [];
+  p.push('<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">');
+  if (!hasTw){
+    INJECTED.push(INJ_PREFIX + "_tw");
+    p.push('<script id="' + INJ_PREFIX + '_tw" src="https://cdn.tailwindcss.com"><\/script>');
+  }
+  if (!hasIc){
+    INJECTED.push(INJ_PREFIX + "_ic");
+    p.push('<script id="' + INJ_PREFIX + '_ic" src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"><\/script>');
+  }
+  INJECTED.push(INJ_PREFIX + "_base");
+  p.push('<style id="' + INJ_PREFIX + '_base">html,body{margin:0}body{padding:30px;background:#0F0E0D;color:#EFEAE2;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif}</style>');
+  p.push('</head><body>');
+  p.push(frag);
+  p.push('</body></html>');
+  return p.join("\n");
+}
+
+function buildDocument(html){
+  if (looksLikeFullDoc(html)){ INJECTED = []; return html; }
+  return wrapFragment(html);
+}
+
+/* ============================================================
+   render into the iframe
+   ============================================================ */
+function renderInto(html, opts){
+  opts = opts || {};
+  if (opts.mode) MODE = opts.mode;
+  if (opts.name != null) NAME = opts.name;
+  if (opts.original != null) ORIGINAL = opts.original;
+  else if (ORIGINAL === "") ORIGINAL = html;
+
+  const docHtml = buildDocument(html);
+  const token = ++loadToken;
+  const prevDoc = frame.contentDocument;      // the document we are replacing
+
+  stageEmpty.style.display = "none";
+  filenameEl.textContent = NAME || "untitled";
+  document.getElementById("btnExport").disabled = false;
+  document.getElementById("btnReset").disabled = false;
+  setStatus("RENDERING…", true);
+
+  /*
+   * Readiness is tricky: assigning srcdoc does NOT swap contentDocument right
+   * away, so a naive poll finds the PREVIOUS (ready) document and boots on it,
+   * leaving the new page unwired. So we require a different Document object,
+   * and additionally wait for readyState !== "loading" — that means "DOM fully
+   * parsed" and, unlike the load event, it does not wait for images or fonts
+   * (one hanging remote photo would otherwise block us forever).
+   */
+  const tryBoot = () => {
+    if (token !== loadToken) return true;
+    const doc = frame.contentDocument;
+    if (!doc || doc === prevDoc || !doc.body) return false;
+    if (booted.has(doc)) return true;
+    let ready = false;
+    try {
+      ready = !!(doc.documentElement && doc.location &&
+                 doc.location.href !== "about:blank" &&
+                 doc.readyState !== "loading" &&
+                 doc.body.childElementCount > 0);
+    } catch (e) { ready = false; }
+    if (!ready) return false;
+    booted.add(doc);
+    try { boot(); } catch (e){ toast("Render error: " + e.message, true); }
+    return true;
+  };
+
+  frame.onload = () => { if (token === loadToken) tryBoot(); };
+  frame.srcdoc = docHtml;
+
+  const started = Date.now();
+  (function tick(){
+    if (token !== loadToken) return;
+    if (tryBoot()) return;
+    if (Date.now() - started > 6000){
+      const doc = frame.contentDocument;      // last resort: wire whatever we have
+      if (doc && doc.body && !booted.has(doc)){
+        booted.add(doc);
+        try { boot(); } catch (e){ toast("Render error: " + e.message, true); }
+      }
+      return;
+    }
+    setTimeout(tick, 40);
+  })();
+}
+
+function boot(){
+  const doc = frame.contentDocument;
+  if (!doc || !doc.body){ toast("Cannot access the preview document", true); return; }
+
+  injectChrome(doc);
+  rescan(doc);
+
+  /* The page may keep growing after first paint. Tailwind's Play CDN is a
+     blocking <script> in <head>, so until it has downloaded the browser can
+     still be mid-parse — a slow network gives us a body with only the header.
+     Keep re-scanning whenever the section count grows, for a few seconds. */
+  let lastSections = SECTIONS.length;
+  let ticks = 0;
+  const iv = setInterval(() => {
+    if (frame.contentDocument !== doc){ clearInterval(iv); return; }
+    if (++ticks > 16){ clearInterval(iv); return; }
+    let next;
+    try { next = buildSections(doc); } catch (e) { return; }
+    if (next.length > lastSections){
+      lastSections = next.length;
+      rescan(doc, true);
+    }
+  }, 400);
+}
+
+function rescan(doc, keepSelection){
+  clearMarkers(doc);
+  const next = buildSections(doc);
+  if (!next.length) return;
+  const activeKey = keepSelection && ACTIVE ? ACTIVE.key : null;
+  const activeName = keepSelection && ACTIVE ? ACTIVE.name : null;
+  const prevView = VIEW;
+  const prevCardIdx = (keepSelection && VIEW === "card" && ACTIVE && ACTIVE_CARD)
+    ? ACTIVE.cards.findIndex(c => c.el === ACTIVE_CARD) : -1;
+  SECTIONS = next;
+  ACTIVE = SECTIONS.find(s => s.key === activeKey) ||
+           SECTIONS.find(s => s.name === activeName) ||
+           SECTIONS[0] || null;
+  /* preserve the focused card across a re-scan when its index survives */
+  if (prevView === "card" && prevCardIdx >= 0 && ACTIVE.cards[prevCardIdx]){
+    VIEW = "card";
+    ACTIVE_CARD = ACTIVE.cards[prevCardIdx].el;
+  } else {
+    VIEW = "own";
+    ACTIVE_CARD = null;
+    ACTIVE_ITEM = null;
+  }
+  renderStrip();
+  renderPanel();
+  paintSelection();
+  setStatus("SAVED " + nowStamp());
+}
+
+function injectChrome(doc){
+  const old = doc.getElementById(HILITE_ID);
+  if (old) old.remove();
+
+  const st = doc.createElement("style");
+  st.id = HILITE_ID;
+  st.textContent = [
+    ".__edit-hover{outline:2px solid rgba(245,189,99,.45) !important;outline-offset:2px !important;cursor:pointer !important}",
+    ".__edit-on{outline:2px solid #F5BD63 !important;outline-offset:2px !important}",
+    ".__edit-card{outline:2px solid #F5BD63 !important;outline-offset:3px !important;box-shadow:0 0 0 1px rgba(245,189,99,.35) !important}",
+    ".__edit-mark{box-shadow:0 0 0 2px #F5BD63,0 0 22px rgba(245,189,99,.45) !important}"
+  ].join("\n");
+  doc.head.appendChild(st);
+
+  /* nothing in the preview may navigate */
+  doc.addEventListener("click", e => {
+    e.preventDefault(); e.stopPropagation();
+    try { selectFromClick(e.target, e); } catch (err) { console.error(err); }
+  }, true);
+  doc.addEventListener("auxclick", e => { e.preventDefault(); e.stopPropagation(); }, true);
+  doc.addEventListener("submit", e => { e.preventDefault(); e.stopPropagation(); }, true);
+  doc.addEventListener("mousedown", e => {
+    if (e.button === 1){ e.preventDefault(); e.stopPropagation(); }
+  }, true);
+
+  doc.addEventListener("mousemove", e => {
+    const el = itemFor(e.target) || sectionFor(e.target);
+    if (hoverEl === el) return;
+    unmask(hoverEl, "__edit-hover");
+    hoverEl = el;
+    if (hoverEl) hoverEl.classList.add("__edit-hover");
+  }, true);
+  doc.addEventListener("mouseleave", () => {
+    unmask(hoverEl, "__edit-hover");
+    hoverEl = null;
+  }, true);
+
+  try { doc.defaultView.open = () => null; } catch (e) {}
+}
+
+/* the section a given element belongs to */
+function sectionFor(el){
+  const doc = frame.contentDocument;
+  const body = doc.body;
+  let n = el;
+  while (n && n.nodeType === 1 && up(n) && up(n) !== body) n = up(n);
+  if (!n || up(n) !== body) return null;
+  const sec = SECTIONS.find(s => s.el === n || s.el.contains(n));
+  return sec ? sec.el : n;
+}
+
+/* which card (if any) does a click sit inside? */
+function cardFor(sec, el){
+  for (const c of sec.cards){
+    if (c.el === el || c.el.contains(el)) return c.el;
+  }
+  return null;
+}
+
+function itemFor(el){
+  if (!ACTIVE) return null;
+  if (VIEW === "card" && ACTIVE_CARD){
+    const c = ACTIVE.cards.find(x => x.el === ACTIVE_CARD);
+    if (!c) return null;
+    const it = c.items.find(i => i.el === el || i.el.contains(el));
+    return it ? it.el : null;
+  }
+  const it = ACTIVE.ownItems.find(i => i.el === el || i.el.contains(el));
+  return it ? it.el : null;
+}
+
+function itemIn(sec, el){
+  /* searches BOTH buckets — used while deciding what to mark as ACTIVE_ITEM */
+  const it = sec.ownItems.find(i => i.el === el || i.el.contains(el));
+  if (it) return it.el;
+  for (const c of sec.cards){
+    const it2 = c.items.find(i => i.el === el || i.el.contains(el));
+    if (it2) return it2.el;
+  }
+  return null;
+}
+
+function selectFromClick(target, evt){
+  if (!target || target.nodeType !== 1) return;
+  /* Programmatic clicks happen on iframe load (chrome auto-focuses the
+     embedded document, which synthesizes a click). Without this filter
+     the *first* section lights up and the right rail looks "always
+     populated", which is exactly the dense listing users hate. */
+  if (evt && evt.isTrusted === false) return;
+  const secEl = sectionFor(target);
+  if (!secEl) return;
+
+  let sec = SECTIONS.find(s => s.el === secEl);
+  if (!sec){
+    /* page changed underneath us; re-scan and retry */
+    const fresh = buildSections(frame.contentDocument);
+    if (!fresh.length) return;
+    SECTIONS = fresh;
+    sec = SECTIONS.find(s => s.el === secEl) || SECTIONS[0];
+    if (!sec) return;
+  }
+  ACTIVE = sec;
+
+  /* where did the click land? blank area of the section → OWN view;
+     inside a card → that single card's view. Never both at once. */
+  const cardEl = cardFor(sec, target);
+  if (cardEl){
+    VIEW = "card";
+    ACTIVE_CARD = cardEl;
+  } else {
+    VIEW = "own";
+    ACTIVE_CARD = null;
+  }
+  ACTIVE_ITEM = itemIn(sec, target);
+
+  renderStrip();
+  renderPanel();
+  paintSelection();
+
+  if (ACTIVE_ITEM){
+    const card = panelBody.querySelector('.field.on');
+    if (card) card.scrollIntoView({ block:"nearest", behavior:"smooth" });
+  }
+}
+
+function paintSelection(){
+  const doc = frame.contentDocument;
+  if (!doc) return;
+  doc.querySelectorAll(".__edit-on").forEach(e => unmask(e, "__edit-on"));
+  doc.querySelectorAll(".__edit-mark").forEach(e => unmask(e, "__edit-mark"));
+  doc.querySelectorAll(".__edit-card").forEach(e => unmask(e, "__edit-card"));
+  if (ACTIVE && ACTIVE.el) ACTIVE.el.classList.add("__edit-on");
+  if (VIEW === "card" && ACTIVE_CARD) ACTIVE_CARD.classList.add("__edit-card");
+  if (ACTIVE_ITEM) ACTIVE_ITEM.classList.add("__edit-mark");
+}
+
+/* ============================================================
+   section strip
+   ============================================================ */
+function renderStrip(){
+  if (!SECTIONS.length){
+    secStrip.innerHTML = '<span class="note">no sections detected</span>';
+    return;
+  }
+  secStrip.innerHTML = SECTIONS.map(s => {
+    const n = s.ownItems.length + s.cards.reduce((a,c) => a + c.items.length, 0);
+    return '<button type="button" class="sec' + (ACTIVE === s ? " on" : "") + '" data-key="' + s.key + '" title="' + esc(s.name) + '">' +
+      esc(s.name.slice(0,26)) + '<span class="n">' + n + '</span>' +
+    '</button>';
+  }).join("");
+  secStrip.querySelectorAll(".sec").forEach(b => {
+    b.onclick = () => {
+      ACTIVE = SECTIONS.find(s => s.key === b.dataset.key) || null;
+      VIEW = "own";
+      ACTIVE_CARD = null;
+      ACTIVE_ITEM = null;
+      renderStrip(); renderPanel(); paintSelection();
+      if (ACTIVE && ACTIVE.el){
+        try { ACTIVE.el.scrollIntoView({ block:"center", behavior:"smooth" }); } catch (e) {}
+      }
+    };
+  });
+}
+
+/* ============================================================
+   indicator rows ("meters")
+
+   A row of identical little bars where only some are lit — e.g.
+   "Seats ▬▬▬▬▬▬▬▬░░░░". Nothing about the CSS is hard-coded: we look
+   for the SHAPE (3–8 empty same-tag siblings, same size, one row),
+   then compare their COMPUTED background colours to work out how many
+   are lit. The on/off recipe is diffed from the two states already in
+   the DOM, so it works for class-based CSS (.dots i.on), Tailwind
+   tokens (bg-custom-accent vs bg-custom/30) and inline styles alike —
+   and only writes back what actually differs, leaving ids, aria
+   labels and anything else on the bar untouched.
+   ============================================================ */
+let METER_CACHE = new WeakMap();
+
+/* What makes one bar look "lit" and another "dim" is almost always the
+   background — but a fade is often done with opacity, and a sheen with a
+   gradient. Take all three into account; nothing else, so a row whose bars
+   merely differ in text colour is not mistaken for a meter. Opacity is
+   rounded, so a bar caught mid-transition cannot invent a third state. */
+function stateOf(el){
+  const win = el.ownerDocument && el.ownerDocument.defaultView;
+  if (!win) return "";
+  const cs = win.getComputedStyle(el);
+  return [cs.backgroundColor, cs.backgroundImage, Number(cs.opacity).toFixed(1)].join(" | ");
+}
+
+/* shape test — deliberately colour-agnostic, so a row that happens to be
+   all dim right now can still be recognised on a later pass. */
+function barRowKids(c){
+  if (!c || !c.children) return null;
+  const kids = [...c.children].filter(k => !SKIP.has(k.tagName) && !isInjected(k));
+  if (kids.length < 3 || kids.length > 8) return null;
+  const tag = kids[0].tagName;
+  if (!kids.every(k => k.tagName === tag)) return null;
+  for (const k of kids){
+    if (k.children.length) return null;          /* must be leaves */
+    if (k.textContent.trim()) return null;       /* bars carry no text */
+  }
+  const r0 = kids[0].getBoundingClientRect();
+  if (r0.width < 6 || r0.height < 2 || r0.height > 26) return null;
+  if (r0.width > 160 || r0.width < r0.height * 1.2) return null;   /* flat, wide */
+  for (const k of kids){
+    const r = k.getBoundingClientRect();
+    if (Math.abs(r.width - r0.width) > Math.max(2, r0.width * 0.3)) return null;
+    if (Math.abs(r.height - r0.height) > Math.max(2, r0.height * 0.4)) return null;
+    if (Math.abs(r.top - r0.top) > 4) return null;                  /* same row */
+  }
+  return kids;
+}
+
+function findBarRow(root){
+  if (!root || root.nodeType !== 1) return null;
+  const pool = [root];
+  try {
+    root.querySelectorAll("*").forEach(n => { if (pool.length < 240) pool.push(n); });
+  } catch (e) {}
+  for (const c of pool){
+    if (SKIP.has(c.tagName) || isInjected(c)) continue;
+    const kids = barRowKids(c);
+    if (kids) return { container: c, kids };
+  }
+  return null;
+}
+
+/* every difference between a lit bar and a dim bar, expressed as VALUES
+   to write rather than markup to copy */
+function diffBarState(a, b){
+  const out = [];
+  const names = new Set([...a.getAttributeNames(), ...b.getAttributeNames()]);
+  names.delete("class"); names.delete("style"); names.delete("id");
+  names.forEach(n => {
+    const va = a.getAttribute(n), vb = b.getAttribute(n);
+    if (va !== vb) out.push({ prop:"attr:" + n, lit:va, dim:vb });
+  });
+  const styleProps = new Set();
+  for (let i = 0; i < a.style.length; i++) styleProps.add(a.style[i]);
+  for (let i = 0; i < b.style.length; i++) styleProps.add(b.style[i]);
+  styleProps.forEach(p => {
+    const va = a.style.getPropertyValue(p), vb = b.style.getPropertyValue(p);
+    if (va !== vb) out.push({ prop:"style:" + p, lit:va, dim:vb });
+  });
+  return out;
+}
+
+function snapBar(el){
+  return {
+    class: el.getAttribute("class"),
+    style: el.getAttribute("style"),
+    fill:  el.getAttribute("fill"),
+    stroke:el.getAttribute("stroke"),
+  };
+}
+
+function buildMeter(container, kids){
+  const states = kids.map(stateOf);
+  if (new Set(states).size !== 2) return null;   /* exactly one lit look + one dim look */
+
+  /* meters fill from the left: the trailing bars define "dim", and every
+     lit bar must sit in one unbroken run at the front. Anything else is
+     ambiguous (or not a meter at all) and we leave it alone. */
+  const dimState = states[states.length - 1];
+  let lit = 0;
+  while (lit < kids.length && states[lit] !== dimState) lit++;
+  if (lit === 0 || lit === kids.length) return null;
+  for (let i = lit; i < kids.length; i++) if (states[i] !== dimState) return null;
+
+  const litBar = kids[lit - 1];
+  const dimBar = kids[kids.length - 1];
+
+  const lt = new Set([...litBar.classList]);
+  const dt = new Set([...dimBar.classList]);
+  const litOnly = [...lt].filter(t => !dt.has(t));
+  const dimOnly = [...dt].filter(t => !lt.has(t));
+  const props = diffBarState(litBar, dimBar);
+
+  const recipe = (litOnly.length || dimOnly.length || props.length)
+    ? { mode:"patch", litOnly, dimOnly, props }
+    : { mode:"snapshot", litSnap: snapBar(litBar), dimSnap: snapBar(dimBar) };
+
+  return { container, bars: kids, total: kids.length, lit, recipe };
+}
+
+function writeProp(el, p, lit){
+  const v = lit ? p.lit : p.dim;
+  if (p.prop.indexOf("attr:") === 0){
+    const name = p.prop.slice(5);
+    if (v === null) el.removeAttribute(name); else el.setAttribute(name, v);
+    return;
+  }
+  const name = p.prop.slice(6);          /* "style:<prop>" */
+  if (v === null || v === "") el.style.removeProperty(name);
+  else el.style.setProperty(name, v);
+}
+
+function writeBar(bar, lit, recipe){
+  if (recipe.mode === "patch"){
+    recipe.litOnly.forEach(t => bar.classList.remove(t));
+    recipe.dimOnly.forEach(t => bar.classList.remove(t));
+    (lit ? recipe.litOnly : recipe.dimOnly).forEach(t => bar.classList.add(t));
+    if (!bar.getAttribute("class")) bar.removeAttribute("class");
+    recipe.props.forEach(p => writeProp(bar, p, lit));
+    return;
+  }
+  const s = lit ? recipe.litSnap : recipe.dimSnap;
+  ["class","style","fill","stroke"].forEach(a => {
+    if (s[a] === null) bar.removeAttribute(a); else bar.setAttribute(a, s[a]);
+  });
+}
+
+/* Only the bars that actually change hands get written, so a bar that was
+   already in the right state keeps its original markup byte for byte —
+   re-writing it would re-serialise the style attribute for no reason. */
+function setMeter(m, k){
+  k = Math.max(0, Math.min(m.total, Math.round(Number(k) || 0)));
+  const from = m.lit;
+  if (k === from) return k;
+  const lo = Math.min(from, k), hi = Math.max(from, k);
+  m.bars.forEach((b, i) => {
+    if (i < lo || i >= hi) return;            /* unchanged */
+    writeBar(b, i < k, m.recipe);
+  });
+  m.lit = k;
+  return k;
+}
+
+/* cached per bar container, so re-rendering the panel never re-measures —
+   and so the control survives going all the way down to 0 lit, where the
+   row no longer gives us two colours to learn from. */
+function meterFor(el){
+  const row = findBarRow(el);
+  if (!row) return null;
+  if (METER_CACHE.has(row.container)) return METER_CACHE.get(row.container);
+  let m = null;
+  try { m = buildMeter(row.container, row.kids); } catch (e) { m = null; }
+  METER_CACHE.set(row.container, m);
+  return m;
+}
+
+function meterHTML(m){
+  const bars = m.bars.map((_, i) =>
+    '<button type="button" class="meter-bar' + (i < m.lit ? " on" : "") +
+      '" data-i="' + i + '" title="' + (i + 1) + ' lit" aria-label="Light ' + (i + 1) + '"></button>'
+  ).join("");
+  return '<div class="meter">' +
+    '<div class="meter-h"><span class="k">INDICATOR</span>' +
+      '<span class="v">' + m.lit + " / " + m.total + ' LIT</span></div>' +
+    '<div class="meter-bars">' + bars + '</div>' +
+    '<p class="meter-note">Click a block to set how many light up — clicking the last lit one dims it.<br>' +
+      '<span class="meter-qs"><button type="button" class="meter-q" data-q="0">none</button>' +
+      ' · <button type="button" class="meter-q" data-q="max">all</button></span></p>' +
+  '</div>';
+}
+
+function refreshMeterUI(cardEl, m){
+  cardEl.querySelectorAll(".meter-bar").forEach((b, i) => b.classList.toggle("on", i < m.lit));
+  const v = cardEl.querySelector(".meter-h .v");
+  if (v) v.textContent = m.lit + " / " + m.total + " LIT";
+}
+
+/* ============================================================
+   right panel
+   ============================================================ */
+function roBlock(it){
+  if (it.kind === "image"){
+    const src = it.el.getAttribute("src") || "";
+    const alt = it.el.getAttribute("alt") || "";
+    return '<div class="ro"><span class="k">CURRENT IMAGE</span>' +
+      (src ? '<img src="' + esc(src) + '" alt="" />' : '<i style="color:#5F584F">no src</i>') +
+      '<div style="margin-top:6px">' + esc(src || "—") + '</div>' +
+      (alt ? '<div style="margin-top:3px">alt: ' + esc(alt) + '</div>' : '') +
+    '</div>';
+  }
+  if (it.kind === "action"){
+    const t = it.el.textContent.trim().replace(/\s+/g," ");
+    const href = it.el.getAttribute("href") || "";
+    const tg = it.el.getAttribute("target") || "";
+    return '<div class="ro"><span class="k">CURRENT</span>' + esc(t || "(no label)") +
+      (href ? '<div style="margin-top:4px">link → ' + esc(href) + (tg === "_blank" ? "  ·  new tab" : "") + '</div>'
+            : '<div style="margin-top:4px">no link on this element</div>') +
+    '</div>';
+  }
+  const t = it.el.textContent.trim().replace(/\s+/g," ");
+  return '<div class="ro"><span class="k">CURRENT</span>' + esc(t || "(empty)") + '</div>';
+}
+
+function itemHTML(it, refKey){
+  /* new "field chip" layout (v6.4): each field is a single collapsible row.
+     By default only the chip is rendered — type badge, current text, an
+     arrow. The .field-edit below it (CURRENT block + inputs + meter) only
+     opens after the user clicks the chip. This is what makes a 27-item
+     section legible: tall, dense rows become 32px chips until you ask. */
+  const on = ACTIVE_ITEM === it.el;
+  const preview = currentPreview(it);
+
+  let editBody = "";
+  if (it.kind === "text"){
+    const cur = it.el.textContent.replace(/\s+/g, " ").trim();
+    const bud = textBudget(it.el);
+    editBody =
+      '<div class="fld-h"><span class="lh-lb">TEXT</span>' +
+        (bud ? '<span class="lim" data-lim>' + cur.length + " / " + bud + '</span>' : '') +
+      '</div>' +
+      '<input type="text" class="t" data-f="text" data-max="' + bud + '"' +
+        (bud ? ' maxlength="' + bud + '"' : '') +
+        ' placeholder="New text…" value="' + esc(cur) + '" />';
+  }
+  else if (it.kind === "image"){
+    const src = it.el.getAttribute("src") || "";
+    const alt = it.el.getAttribute("alt") || "";
+    editBody =
+      '<label class="lb">IMAGE URL</label>' +
+      '<input type="text" data-f="src" value="' + esc(src) + '" placeholder="https://…  (drag the image into Squarespace to get the URL)" />' +
+      '<label class="lb">ALT TEXT</label>' +
+      '<input type="text" data-f="alt" value="' + esc(alt) + '" />' +
+      '<p class="note" style="margin:9px 0 0">Size and crop stay exactly as set in your CSS.</p>';
+  }
+  else {
+    const t = it.el.textContent.trim().replace(/\s+/g," ");
+    const href = it.el.getAttribute("href") || "";
+    const isBtn = it.el.tagName === "BUTTON";
+    const bud = it.noText ? 0 : textBudget(it.el);
+    editBody =
+      (it.noText
+        ? '<p class="note" style="margin:0 0 4px">This link is built from several styled lines — edit each line as its own field above. Only the URL is set here.</p>'
+        : '<label class="lb">BUTTON / LINK TEXT' +
+            (bud ? '<span class="lim" data-lim>' + t.length + " / " + bud + '</span>' : '') +
+          '</label>' +
+          '<input type="text" data-f="text" data-max="' + bud + '"' +
+            (bud ? ' maxlength="' + bud + '"' : '') +
+            ' value="' + esc(t) + '" />') +
+      '<label class="lb">LINK URL</label>' +
+      '<input type="text" data-f="href" value="' + esc(href) + '" placeholder="/booking  ·  #anchor  ·  https://…  ·  tel:…" />' +
+      '<label class="cb"><input type="checkbox" data-f="target"' + (it.el.getAttribute("target") === "_blank" ? " checked" : "") + ' /> open in a new tab</label>' +
+      (isBtn && !it.noText ? '<p class="note" style="margin:9px 0 0">This is a &lt;button&gt;. Add a URL and it exports as a real link.</p>' : '');
+  }
+
+  /* an "indicator row" living inside this item (e.g. the bars after the
+     word "Seats") gets its own control, sitting under the text field */
+  let meter = "";
+  if (it.kind !== "image"){
+    const m = meterFor(it.el);
+    if (m){ it.__meter = m; meter = meterHTML(m); }
+    else delete it.__meter;
+  }
+
+  return '<div class="field' + (on ? " on" : "") + '"' + ' data-ref="' + esc(refKey) + '" data-kind="' + it.kind + '">' +
+    '<button class="field-chip">' +
+      '<span class="kind k-' + it.kind + '">' + it.kind.toUpperCase() + '</span>' +
+      '<span class="ftxt">' + preview + '</span>' +
+      '<span class="fc-arrow">' + (on ? '▴' : '▾') + '</span>' +
+    '</button>' +
+    (on ? '<div class="field-edit">' + roBlock(it) + editBody + meter + '</div>'
+        : '') +
+  '</div>';
+}
+
+/* Short, single-line preview of an item's current value, used as the chip
+   label. Always escaped and length-capped so a 30-field section doesn't
+   blow up the right rail. */
+function currentPreview(it){
+  if (it.kind === "image"){
+    let src = it.el.getAttribute("src") || "(no src)";
+    if (src.length > 32) src = src.slice(0, 30) + "…";
+    return esc(src);
+  }
+  let t = it.el.textContent.trim().replace(/\s+/g," ");
+  if (!t) return '<i class="empty">(empty)</i>';
+  if (t.length > 32) t = t.slice(0, 30) + "…";
+  return esc(t);
+}
+
+/* label for a card chip — its heading text, else image alt, else snippet */
+function cardLabel(c, i){
+  const h = c.el.querySelector("h1,h2,h3,h4,h5,h6");
+  if (h && h.textContent.trim()) return h.textContent.trim().replace(/\s+/g," ").slice(0, 34);
+  const im = c.el.querySelector("img");
+  if (im){
+    const alt = (im.getAttribute("alt") || "").trim();
+    if (alt) return alt.slice(0, 34);
+  }
+  const t = c.el.textContent.trim().replace(/\s+/g," ");
+  return t.slice(0, 34) || ("Card " + (i + 1));
+}
+
+/* the card list shown under the section's own items. Cards are never
+   expanded here — clicking one opens a focused card panel. */
+function renderCardNav(){
+  const chips = ACTIVE.cards.map((c, i) =>
+    '<button type="button" class="card-chip" data-card-i="' + i + '">' +
+      '<span class="ci">' + (i + 1) + '</span>' +
+      '<span class="cl">' + esc(cardLabel(c, i)) + '</span>' +
+      '<span class="cn">' + c.items.length + '</span>' +
+    '</button>'
+  ).join("");
+  return '<div class="card-nav-h">CARDS IN THIS SECTION <span>· click one to edit</span></div>' +
+    '<div class="card-nav">' + chips + '</div>';
+}
+
+/* focused view for a single card: every text, image and link in the card,
+   shown in one shot with a BACK control to return to the section. */
+function renderCardPanel(){
+  const ci = ACTIVE.cards.findIndex(c => c.el === ACTIVE_CARD);
+  const card = ACTIVE.cards[ci];
+  if (!card){ VIEW = "own"; ACTIVE_CARD = null; renderPanel(); return; }
+
+  const head = '<div class="sec-title card-head">' +
+    '<button type="button" class="back-btn" id="backToSection">← SECTION</button>' +
+    '<b>Card ' + (ci + 1) + '</b>' +
+    '<span>' + card.items.length + (card.items.length === 1 ? " ITEM" : " ITEMS") + '</span>' +
+  '</div>';
+  const sub = '<p class="card-sub">' + esc(cardLabel(card, ci)) + '</p>';
+  const body = card.items.map((it, ii) => itemHTML(it, "cd:" + ci + ":" + ii)).join("");
+  panelBody.innerHTML = head + sub + body;
+  bindPanel();
+}
+
+function renderPanel(){
+  if (!ACTIVE){
+    panelBody.innerHTML = '<p class="panel-empty">Load a page, then click any block on the left — or a section chip above. Click a section\'s blank area to edit its heading, text, buttons and images. Click a card inside it to edit just that card.</p>';
+    return;
+  }
+  if (VIEW === "card" && ACTIVE_CARD){ renderCardPanel(); return; }
+
+  const ownCount = ACTIVE.ownItems.length;
+  const cardCount = ACTIVE.cards.length;
+
+  const head = '<div class="sec-title"><b>' + esc(ACTIVE.name) + '</b><span>' +
+    ownCount + (ownCount === 1 ? " ITEM" : " ITEMS") +
+    (cardCount ? " · " + cardCount + (cardCount === 1 ? " CARD" : " CARDS") : "") +
+  '</span></div>';
+
+  let body = "";
+  if (ownCount){
+    body += ACTIVE.ownItems.map((it, i) => itemHTML(it, "own:" + i)).join("");
+  } else {
+    body += '<p class="panel-empty">No direct heading, text, image or link in this section — everything lives inside its cards below.</p>';
+  }
+  if (cardCount) body += renderCardNav();
+
+  panelBody.innerHTML = head + body;
+  bindPanel();
+}
+
+/* look up an item by the refKey stamped on each .item card.
+   "own:<i>" → section ownItems[i];  "cd:<ci>:<ii>" → cards[ci].items[ii]. */
+function findItemByRef(refKey){
+  if (!ACTIVE || !refKey) return null;
+  const p = refKey.split(":");
+  if (p[0] === "own") return ACTIVE.ownItems[+p[1]] || null;
+  if (p[0] === "cd"){
+    const c = ACTIVE.cards[+p[1]];
+    return c ? (c.items[+p[2]] || null) : null;
+  }
+  return null;
+}
+
+/* ============================================================
+   editing — mutate the live DOM, never rebuild while typing
+   ============================================================ */
+
+/* The panel is NOT re-rendered on every keystroke (that would steal focus).
+   Card titles / section chips are therefore derived once, at render time —
+   so after a blur we refresh just those labels in place. Without this the
+   card subtitle would keep showing the pre-edit heading right next to the
+   new value, which reads like the edit failed. */
+function refreshPanelLabels(){
+  if (ACTIVE_CARD){
+    const ci = ACTIVE.cards.findIndex(c => c.el === ACTIVE_CARD);
+    const sub = panelBody.querySelector(".card-sub");
+    if (ci >= 0 && sub) sub.textContent = cardLabel(ACTIVE.cards[ci], ci);
+  }
+  panelBody.querySelectorAll(".card-chip").forEach(chip => {
+    const i = +chip.dataset.cardI;
+    const c = ACTIVE.cards[i];
+    if (!c) return;
+    const lbl = chip.querySelector(".cl");
+    if (lbl) lbl.textContent = cardLabel(c, i);
+  });
+}
+
+function bindPanel(){
+  panelBody.querySelectorAll(".field").forEach(card => {
+    const it = findItemByRef(card.dataset.ref);
+    if (!it) return;
+
+    const chip = card.querySelector(".field-chip");
+    if (chip) chip.onclick = (e) => {
+      /* clicking inside the editor shouldn't toggle — only the chip row does */
+      const edit = card.querySelector(".field-edit");
+      if (edit && e.target.closest(".field-edit")) return;
+      ACTIVE_ITEM = it.el;
+      renderPanel(); paintSelection();
+    };
+
+    /* hover on the chip paints a mark on the matching element, so the
+       user can see what they're about to edit without scrolling the
+       preview to find it */
+    if (chip){
+      chip.addEventListener("mouseenter", () => it.el.classList.add("__edit-mark"));
+      chip.addEventListener("mouseleave", () => {
+        if (ACTIVE_ITEM !== it.el) unmask(it.el, "__edit-mark");
+      });
+    }
+
+    /* the "n / max" badge next to a text field. Amber once the ceiling is
+       reached, which is the moment the browser stops accepting keystrokes —
+       that silence needs an explanation on screen. */
+    const lim = card.querySelector("[data-lim]");
+    const bump = () => {
+      const tin = card.querySelector('input[data-f="text"]');
+      if (!lim || !tin) return;
+      const max = +tin.dataset.max || 0;
+      const used = tin.value.length;
+      lim.textContent = used + " / " + max;
+      const full = !!max && used >= max;
+      lim.classList.toggle("at", full);
+      tin.classList.toggle("at-limit", full);
+    };
+
+    card.querySelectorAll("[data-f]").forEach(inp => {
+      inp.addEventListener("input", () => { applyField(it, inp); if (inp.dataset.f === "text") bump(); });
+      inp.addEventListener("change", () => applyField(it, inp));
+      inp.addEventListener("blur", () => {
+        const ro = card.querySelector(".ro");
+        if (ro) ro.outerHTML = roBlock(it);
+        refreshPanelLabels();
+        bump();
+        dirty();
+      });
+    });
+
+    /* indicator row — clicking block i lights up i+1; clicking the last
+       lit block dims it again, so the whole 0…N range is reachable.
+       These clicks stop at the control: without stopPropagation the click
+       would bubble into the .item handler, re-render the panel underneath
+       the pointer and scatter hover marks across the preview. */
+    if (it.__meter && card.querySelector(".meter-bar")){
+      const m = it.__meter;
+      const activate = () => {
+        ACTIVE_ITEM = it.el;
+        renderPanel();
+        paintSelection();
+      };
+      card.querySelectorAll(".meter-bar").forEach(b => {
+        b.onclick = ev => {
+          ev.stopPropagation();
+          const i = +b.dataset.i;
+          setMeter(m, (i + 1 === m.lit) ? m.lit - 1 : i + 1);
+          refreshMeterUI(card, m);
+          activate();
+          dirty();
+        };
+      });
+      card.querySelectorAll(".meter-q").forEach(b => {
+        b.onclick = ev => {
+          ev.stopPropagation();
+          setMeter(m, b.dataset.q === "max" ? m.total : 0);
+          refreshMeterUI(card, m);
+          activate();
+          dirty();
+        };
+      });
+    }
+  });
+
+  /* a click on a card chip opens that single card's focused panel */
+  panelBody.querySelectorAll(".card-chip").forEach(chip => {
+    chip.onclick = () => {
+      const c = ACTIVE.cards[+chip.dataset.cardI];
+      if (!c) return;
+      VIEW = "card";
+      ACTIVE_CARD = c.el;
+      ACTIVE_ITEM = null;
+      renderPanel();
+      paintSelection();
+      try { c.el.scrollIntoView({ block:"center", behavior:"smooth" }); } catch (e) {}
+    };
+  });
+
+  /* BACK returns from a focused card to the section overview */
+  const back = panelBody.querySelector("#backToSection");
+  if (back) back.onclick = () => {
+    VIEW = "own";
+    ACTIVE_CARD = null;
+    ACTIVE_ITEM = null;
+    renderPanel();
+    paintSelection();
+  };
+}
+
+function applyField(it, inp){
+  const f = inp.dataset.f;
+  let v = inp.value;
+
+  if (f === "text"){
+    /* Inputs carry maxlength already (v6.6) — this is the belt-and-braces
+       for values that arrive programmatically (scripted fill, an older
+       browser). Over-long text is what pushed whole rows around. */
+    const max = +inp.dataset.max || 0;
+    if (max && v.length > max){ v = v.slice(0, max); inp.value = v; }
+    setTextPreserving(it.el, v);
+  }
+  else if (f === "src"){
+    if (v.trim()) it.el.setAttribute("src", v.trim());
+    else it.el.removeAttribute("src");
+  }
+  else if (f === "alt"){
+    it.el.setAttribute("alt", v);
+  }
+  else if (f === "href"){
+    if (v.trim()) it.el.setAttribute("href", v.trim());
+    else it.el.removeAttribute("href");
+  }
+  else if (f === "target"){
+    if (inp.checked) it.el.setAttribute("target", "_blank");
+    else it.el.removeAttribute("target");
+  }
+
+  /* the CURRENT block lives inside .field-edit (v6.4) or, in old code paths,
+     inside .item-body. Find whichever ancestor holds it. */
+  const scope = inp.closest(".field-edit") || inp.closest(".item-body");
+  if (scope){
+    const ro = scope.querySelector(".ro");
+    if (ro && (f === "text" || f === "href" || f === "target")) ro.outerHTML = roBlock(it);
+  }
+
+  dirty();
+}
+
+/* ============================================================
+   text budget — how many characters fit without moving anything
+   ------------------------------------------------------------
+   The editor may only change TEXT; it must never touch the page's CSS. So
+   the one lever that keeps the layout still is how much text a field is
+   allowed to hold. Every editable text / action field gets a measured
+   ceiling:
+
+     avgChar   average width of one character, in the element's own font
+     perLine   characters that fit across the element's own text box
+     lines     lines the element already occupies
+     slack     free horizontal room left in the element's own container
+
+     budget = max(currentLength, min(CEILING, perLine*lines + slack/avgChar))
+
+   In words: "you may retype the text you already have, plus whatever empty
+   space your own row already offers — never more." A nav link (<nav> is
+   exactly as wide as its own links, no slack) therefore keeps its length;
+   a button in a roomy row may breathe; a heading may fill the lines it
+   already wraps onto. Links and buttons stop at 20 characters, body text
+   at 240. Meant to be read, not guessed at: the badge in the UI shows it.
+
+   Measured once and cached per element — if it were recomputed as the user
+   types, each slightly-wider box would raise the ceiling and the field
+   would creep wider one character at a time. */
+const TEXT_BUDGET = new WeakMap();
+const ACTION_CEILING = 20;
+const TEXT_CEILING = 240;
+
+function px(v){ return parseFloat(v) || 0; }
+
+/* average character width in the element's own font — measured with a
+   throw-away probe so it doesn't depend on what the label happens to say */
+function avgCharWidth(el, cs){
+  const doc = el.ownerDocument;
+  const probe = doc.createElement("span");
+  probe.setAttribute("aria-hidden", "true");
+  probe.textContent = "abcdefghijklmnopqrstuvwxyz 0123456789";
+  probe.style.cssText =
+    "position:absolute;left:-99999px;top:0;visibility:hidden;white-space:pre;" +
+    "margin:0;padding:0;border:0;display:inline-block;" +
+    "font-family:" + cs.fontFamily + ";font-size:" + cs.fontSize +
+    ";font-weight:" + cs.fontWeight + ";font-style:" + cs.fontStyle +
+    ";letter-spacing:" + cs.letterSpacing + ";word-spacing:" + cs.wordSpacing +
+    ";text-transform:" + cs.textTransform + ";";
+  const host = doc.body || doc.documentElement;
+  host.appendChild(probe);
+  const w = probe.getBoundingClientRect().width / 37;
+  probe.remove();
+  return w > 1 ? w : Math.max(4, px(cs.fontSize) * 0.52);
+}
+
+/* free horizontal room in the element's own container: what is left after
+   every sibling box and every gap. A <nav> is sized by its own links, so it
+   has none and a link may not grow at all. A button row inside a fixed-width
+   column has plenty, so its buttons may.
+
+   Important: flex gaps can come from column-gap OR from per-sibling margins
+   (Tailwind's `space-x-6` is the latter — getBoundingClientRect excludes
+   margins, so just summing width × n would double-count that room as slack).
+   The robust measure is the span from the first child's left edge to the
+   last child's right edge — that already includes every margin-gap. */
+function containerSlack(el){
+  const p = el.parentElement;
+  if (!p || !p.children.length) return 0;
+  const pcs = p.ownerDocument.defaultView.getComputedStyle(p);
+  const disp = pcs.display;
+  if (disp.indexOf("grid") >= 0) return 0;                       /* tracks are fixed */
+  if (disp.indexOf("flex") < 0 && disp !== "block" && disp !== "inline-block") return 0;
+  if (disp.indexOf("flex") >= 0 && pcs.flexDirection.indexOf("column") === 0) return 0;
+  if (pcs.flexWrap === "wrap" || pcs.flexWrap === "wrap-reverse") return 0;
+  const pr = p.getBoundingClientRect();
+  const inner = pr.width - px(pcs.paddingLeft) - px(pcs.paddingRight)
+                         - px(pcs.borderLeftWidth) - px(pcs.borderRightWidth);
+  let first = null, last = null;
+  for (const c of p.children){
+    const r = c.getBoundingClientRect();
+    if (r.width <= 0) continue;                                  /* display:none etc. */
+    if (first === null) first = r.left;
+    last = r.right;
+  }
+  if (first === null) return 0;
+  const span = last - first;
+  return Math.max(0, inner - span);
+}
+
+/* Is this element a drawn "pill" (own background / border / padding) rather
+   than bare running text? A nav link and a "Book" pill are both <a> and are
+   the same width, but only one of them may wrap onto a second line — the
+   user asked for buttons to be lenient and nav items to be strict. */
+function pillLike(el, cs){
+  const padX = px(cs.paddingLeft) + px(cs.paddingRight);
+  const bg = cs.backgroundColor || "";
+  const hasBg = bg && bg !== "transparent" && !/^rgba?\([^)]*,\s*0\s*\)$/.test(bg);
+  const hasBorder = px(cs.borderLeftWidth) > 0 && cs.borderLeftStyle !== "none";
+  const radius = px(cs.borderTopLeftRadius);
+  return padX >= 8 || hasBg || (hasBorder && radius > 0);
+}
+
+function textBudget(el){
+  if (!el || !el.ownerDocument || !el.getBoundingClientRect) return 0;
+  if (TEXT_BUDGET.has(el)) return TEXT_BUDGET.get(el);
+  const win = el.ownerDocument.defaultView;
+  const cs = win.getComputedStyle(el);
+  const current = el.textContent.replace(/\s+/g, " ").trim().length;
+  const r = el.getBoundingClientRect();
+  let budget = 0;
+  if (current && r.width > 0){
+    const chW  = avgCharWidth(el, cs);
+    const boxW = Math.max(1, r.width - px(cs.paddingLeft) - px(cs.paddingRight)
+                                  - px(cs.borderLeftWidth) - px(cs.borderRightWidth));
+    const perLine  = Math.max(1, Math.floor(boxW / chW));
+    const lh       = px(cs.lineHeight) || px(cs.fontSize) * 1.2 || 16;
+    const contentH = Math.max(1, r.height - px(cs.paddingTop) - px(cs.paddingBottom)
+                                       - px(cs.borderTopWidth) - px(cs.borderBottomWidth));
+    const lines    = Math.max(1, Math.round(contentH / lh));
+    /* a pill may take one more line — "2 lines is fine for a button" */
+    const room     = lines + (pillLike(el, cs) ? 1 : 0);
+    const slackChars = Math.floor(containerSlack(el) / chW);
+    const ceiling  = (el.tagName === "A" || el.tagName === "BUTTON") ? ACTION_CEILING : TEXT_CEILING;
+    budget = Math.max(current, Math.min(ceiling, perLine * room + slackChars));
+  }
+  TEXT_BUDGET.set(el, budget);
+  return budget;
+}
+
+/* Replace the element's visible label with `text` without destroying icons.
+   We never remove element children (iconify-icon, svg, img, br, spans keep
+   their markup) — we only touch TEXT NODES.
+
+   Four cases, in this order:
+
+   1. hover-swap — several text blocks sharing one rectangle (a button whose
+      resting and hovered labels are stacked on top of each other). Every
+      node is the same label in a different state: rewrite all of them, or
+      the stale copy stays visible.
+   2. ONE RUN BROKEN BY <br> — every text node is a direct child of the
+      element, so the label is a single run someone split with hard breaks
+      (the hero <h1> "Breathe. Move. <br>Return to center."). Replace the
+      run and drop the breaks that separated it: leaving the <br> behind
+      moves the line break to the end of the new text.
+   3. a STACK OF FIELDS on separate lines (scan() should have split these
+      into their own items; if one slipped through, merging them is the bug
+      that collapsed three styled rows into one) — edit the first run and
+      leave the others alone.
+   4. everything else — write the first text node, drop the surplus ones so
+      the export has no stale second copy. */
+function setTextPreserving(el, text){
+  const doc = el.ownerDocument;
+  if (!el.children.length){ el.textContent = text; return; }
+
+  const walker = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+  const nodes = [];
+  let n;
+  while ((n = walker.nextNode())){
+    if (n.nodeValue && n.nodeValue.trim()) nodes.push(n);
+  }
+
+  /* no text at all — e.g. <a><iconify-icon/></a>: put ours before the icon */
+  if (!nodes.length){
+    el.insertBefore(doc.createTextNode(text), el.firstChild);
+    return;
+  }
+
+  /* 1. hover-swap: two or more text children sitting on the same rectangle.
+     Every one of them is the same label, in a different state. Rewrite
+     all of them so the resting label AND the hovered label show the new
+     text — otherwise the second copy stays visible (the original bug). */
+  if (nodes.length > 1 && textBlocksOverlap(el)){
+    nodes.forEach(nd => { nd.nodeValue = text; });
+    return;
+  }
+
+  /* 2. one run with hard breaks: no element sits between the text nodes. */
+  if (nodes.every(nd => nd.parentNode === el)){
+    let done = false;
+    for (const child of [...el.childNodes]){
+      if (child.nodeType === 3){
+        if (!child.nodeValue.trim()) continue;
+        if (!done){ child.nodeValue = text; done = true; }
+        else el.removeChild(child);            /* surplus run */
+      }
+      else if (child.nodeType === 1 && child.tagName === "BR" && done){
+        el.removeChild(child);                 /* the break it was on */
+      }
+    }
+    return;
+  }
+
+  nodes[0].nodeValue = text;
+
+  /* 3. several blocks on separate lines = a field stack we must not merge */
+  if (nodes.length > 1 && stackedTextBlocks(el) >= 2) return;
+
+  /* 4. not a stack and not a hover-swap: trim the extra text nodes so we
+     don't leave junk. After removal, drop any element child that became
+     empty AND has no other useful children (icons, br), so the export
+     is clean. */
+  for (let i = 1; i < nodes.length; i++){
+    const nd = nodes[i];
+    if (!nd.parentNode) continue;
+    const parent = nd.parentNode;
+    nd.parentNode.removeChild(nd);
+    if (parent !== el && parent.childNodes.length === 0){
+      const keep = [...parent.childNodes].some(x => x.nodeType !== 1 || (x.tagName !== "BR" && x.tagName.indexOf("ICONIFY") !== 0));
+      if (!keep) parent.parentNode && parent.parentNode.removeChild(parent);
+    }
+  }
+}
+
+/* direct children that carry text — icons and <br> don't count */
+function textCarryingChildren(el){
+  const out = [];
+  for (const c of el.children){
+    if (c.tagName === "BR" || c.tagName.indexOf("ICONIFY") === 0) continue;
+    if (!c.textContent || !c.textContent.trim()) continue;
+    out.push(c);
+  }
+  return out;
+}
+
+/* How many visually separate text lines does this element carry?
+   Three shapes share the same markup, so it looks at LAYOUT:
+
+     (a) a STACK OF STYLED FIELDS — <span>SAMA</span><span>Yoga Studio</span>
+         laid out one per line, or a timetable slot
+         <span>09:00</span><span>Vinyasa Flow</span><span>Maya</span>.
+         Each line is its own editable value.
+     (b) ONE SENTENCE THAT WRAPS — a single text node spilling onto a second
+         line. One value.
+     (c) a HOVER-SWAP LABEL — two spans stacked in the same rectangle. One
+         value (setTextPreserving handles that case separately).
+
+   v6.6: the old version only inspected DIRECT element children, so a stack
+   hidden inside a single wrapper (the logo <a> → <div class="flex flex-col">
+   → two spans) scored 1 and the writer happily deleted the second line.
+   It now also follows such a wrapper, and falls back to measuring which
+   lines the individual TEXT NODES start on — one node wrapping is still one
+   run, two nodes on different lines is a stack. */
+function stackedTextBlocks(el, depth){
+  const win = el.ownerDocument.defaultView;
+
+  /* Two children sharing a rectangle are a hover-swap, not a stack of
+     separately editable lines — no matter how many of them there are. */
+  if (textBlocksOverlap(el)) return 1;
+
+  let blockLines = 0;
+  for (const c of textCarryingChildren(el)){
+    const cs = win.getComputedStyle(c);
+    if (cs.display === "none" || cs.visibility === "hidden" || Number(cs.opacity) === 0) continue;
+    const d = cs.display;
+    if (d === "block" || d === "flex" || d === "grid" || d === "list-item" ||
+        d === "table" || d === "table-row" || d === "flow-root") blockLines++;
+  }
+  if (blockLines >= 2) return blockLines;
+
+  const lineLines = textRunLines(el);
+
+  /* a single wrapper may hold the whole stack — step into it */
+  if ((depth || 0) < 3){
+    for (const c of el.children){
+      if (c.tagName === "BR" || c.tagName.indexOf("ICONIFY") === 0) continue;
+      if (c.children.length < 2) continue;
+      const inner = stackedTextBlocks(c, (depth || 0) + 1);
+      if (inner >= 2) return inner;
+    }
+  }
+  return Math.max(blockLines, lineLines);
+}
+
+/* how many distinct lines do the element's individual TEXT NODES start on?
+   Bucketed to 4px so a baseline wobble doesn't read as a second line. */
+function textRunLines(el){
+  const doc = el.ownerDocument, win = doc.defaultView;
+  const tops = new Set();
+  const walker = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+  let n;
+  while ((n = walker.nextNode())){
+    if (!n.nodeValue || !n.nodeValue.trim()) continue;
+    const host = n.parentElement || el;
+    const cs = win.getComputedStyle(host);
+    if (cs.display === "none" || cs.visibility === "hidden" || Number(cs.opacity) === 0) continue;
+    const range = doc.createRange();
+    range.selectNodeContents(n);
+    let top = null;
+    for (const r of range.getClientRects()){
+      if (!r.width && !r.height) continue;
+      top = Math.round(r.top / 4);    /* the run's FIRST line only */
+      break;
+    }
+    if (top !== null) tops.add(top);
+  }
+  return tops.size;
+}
+
+/* two text children are a hover-swap pair when they occupy the SAME pixel
+   rectangle. CSS usually does that by stacking one label on top of the
+   other (absolute positioning, transform translate, grid stacking) and
+   toggling which one is visible — e.g. a button whose "Online book" and
+   "Online booking" sit in the same pill. We can NOT trust display:none /
+   opacity:0 here: many real buttons only fade or translate on hover, so
+   both labels remain in the layout at rest and both are visible until the
+   user actually hovers. */
+function textBlocksOverlap(el){
+  const win = el.ownerDocument.defaultView;
+  const rects = [];
+  for (const c of textCarryingChildren(el)){
+    const cs = win.getComputedStyle(c);
+    if (cs.display === "none" || cs.visibility === "hidden") continue;
+    const r = c.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) continue;
+    rects.push(r);
+  }
+  for (let i = 0; i < rects.length; i++){
+    for (let j = i + 1; j < rects.length; j++){
+      const a = rects[i], b = rects[j];
+      const overlapW = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+      const overlapH = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+      if (overlapW > 4 && overlapH > 4) return true;
+    }
+  }
+  return false;
+}
+
+/* all text-bearing children, including ones hidden at rest. The hover-swap
+   writer needs to update every one so the resting label and the hovered
+   label stay in sync. */
+function allTextBlocks(el){
+  const out = [];
+  for (const c of el.children){
+    if (c.tagName === "BR" || c.tagName.indexOf("ICONIFY") === 0) continue;
+    if (!c.textContent || !c.textContent.trim()) continue;
+    out.push(c);
+  }
+  return out;
+}
+
+/* ============================================================
+   persistence (暂存)
+   ============================================================ */
+function serialize(){
+  const doc = frame.contentDocument;
+  if (!doc || !doc.documentElement) return "";
+
+  if (MODE === "paste"){
+    const body = doc.body.cloneNode(true);
+    clean(body);
+    return body.innerHTML.trim();
+  }
+  const root = doc.documentElement.cloneNode(true);
+  clean(root);
+  return "<!DOCTYPE html>\n" + root.outerHTML;
+}
+
+function clean(root){
+  const kill = sel => root.querySelectorAll(sel).forEach(n => n.remove());
+  kill("#" + HILITE_ID);
+  INJECTED.forEach(id => kill("#" + id));
+  root.querySelectorAll(".__edit-on,.__edit-mark,.__edit-hover,.__edit-card").forEach(n => {
+    n.classList.remove("__edit-on");
+    n.classList.remove("__edit-mark");
+    n.classList.remove("__edit-hover");
+    n.classList.remove("__edit-card");
+    if (!n.getAttribute("class")) n.removeAttribute("class");
+  });
+}
+
+function dirty(){
+  setStatus("UNSAVED…", true);
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    const html = serialize();
+    try {
+      localStorage.setItem(KEY, JSON.stringify({ mode:MODE, name:NAME, original:ORIGINAL, current:html, at:Date.now() }));
+      setStatus("SAVED " + nowStamp());
+    } catch (e){
+      setStatus("SAVE FAILED", true);
+      toast("Local save failed (page too large?): " + e.message, true);
+    }
+  }, 420);
+}
+
+function loadSaved(){
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (o && o.current) return o;
+  } catch (e) {}
+  return null;
+}
+
+/* ============================================================
+   export
+   ============================================================ */
+function baseName(){ return (NAME || "page").replace(/\.html?$/i, "") + "-" + dateStamp() + ".html"; }
+
+async function doExport(){
+  const html = serialize();
+  if (!html){ toast("Nothing to export", true); return; }
+  const name = baseName();
+
+  try {
+    localStorage.setItem(KEY, JSON.stringify({ mode:MODE, name:NAME, original:ORIGINAL, current:html, at:Date.now() }));
+  } catch (e) {}
+
+  let copied = false;
+  try { await navigator.clipboard.writeText(html); copied = true; } catch (e) {}
+
+  const blob = new Blob([html], { type:"text/html;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+
+  setStatus("SAVED " + nowStamp());
+  toast("Exported " + name + (copied ? " · also copied to clipboard" : " · move the file into output/"));
+}
+
+/* ============================================================
+   loading
+   ============================================================ */
+function loadFile(file){
+  const fr = new FileReader();
+  fr.onload = () => {
+    const text = String(fr.result || "");
+    renderInto(text, { mode:"file", name:file.name, original:text });
+    drawer.classList.add("collapsed");
+    toast("Loaded " + file.name);
+  };
+  fr.onerror = () => toast("Could not read " + file.name, true);
+  fr.readAsText(file, "UTF-8");
+}
+
+/* ============================================================
+   wiring
+   ============================================================ */
+document.getElementById("btnOpen").onclick = () => fileInput.click();
+fileInput.onchange = e => {
+  const f = e.target.files && e.target.files[0];
+  if (f) loadFile(f);
+  fileInput.value = "";
+};
+
+document.getElementById("btnPaste").onclick = () => {
+  drawer.classList.toggle("collapsed");
+  if (!drawer.classList.contains("collapsed")) pasteInput.focus();
+};
+document.getElementById("btnPasteClear").onclick = () => { pasteInput.value = ""; pasteInput.focus(); };
+document.getElementById("btnRender").onclick = () => {
+  const v = pasteInput.value.trim();
+  if (!v){ toast("Paste some HTML first", true); return; }
+  renderInto(v, { mode:"paste", name:"squarespace-block.html", original:v });
+  drawer.classList.add("collapsed");
+  toast("Rendered");
+};
+pasteInput.addEventListener("keydown", e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter"){ e.preventDefault(); document.getElementById("btnRender").click(); }
+  else if (e.key === "Enter" && !e.shiftKey && !e.isComposing){
+    /* plain Enter inside a multi-line paste box normally inserts a newline,
+       but a paste fragment is rarely edited by hand — what the user wants
+       is to render. Cmd/Ctrl+Enter still works for the explicit form. */
+    e.preventDefault();
+    document.getElementById("btnRender").click();
+  }
+});
+
+document.getElementById("btnExport").onclick = doExport;
+
+document.getElementById("btnReset").onclick = () => {
+  if (!SECTIONS.length && !ORIGINAL){
+    toast("Already empty");
+    return;
+  }
+  if (!confirm("Clear the loaded page and forget all edits?")) return;
+  doClear();
+  toast("Cleared");
+};
+
+/* full clear — wipes iframe, paste input, localStorage, all state.
+   RESET is now the "start fresh" action, not a revert. */
+function doClear(){
+  /* wipe localStorage so a reload does not bring the page back */
+  try { localStorage.removeItem(KEY); } catch (e) {}
+  /* blank the iframe; use about:blank so subsequent srcdoc assignments start clean */
+  try {
+    loadToken++;
+    frame.onload = null;
+    frame.removeAttribute("srcdoc");
+    frame.src = "about:blank";
+  } catch (e) {}
+  booted = new WeakSet();
+  METER_CACHE = new WeakMap();
+  /* wipe state */
+  MODE = "file"; NAME = ""; ORIGINAL = ""; INJECTED = [];
+  SECTIONS = []; ACTIVE = null; VIEW = "own"; ACTIVE_CARD = null; ACTIVE_ITEM = null; hoverEl = null;
+  clearTimeout(saveTimer); saveTimer = null;
+  /* wipe paste drawer */
+  pasteInput.value = "";
+  /* reset UI */
+  stageEmpty.style.display = "";
+  filenameEl.textContent = "no file";
+  document.getElementById("btnExport").disabled = true;
+  document.getElementById("btnReset").disabled = true;
+  secStrip.innerHTML = "";
+  panelBody.innerHTML = '<p class="panel-empty">Load a page, then click any block on the left — or a section chip above. Click a section\'s blank area to edit its heading, text, buttons and images. Click a card inside it to edit just that card.</p>';
+  setStatus("READY");
+}
+
+/* drag & drop onto the stage */
+["dragenter","dragover"].forEach(ev =>
+  stage.addEventListener(ev, e => { e.preventDefault(); stage.classList.add("drop"); })
+);
+["dragleave","drop"].forEach(ev =>
+  stage.addEventListener(ev, e => { e.preventDefault(); stage.classList.remove("drop"); })
+);
+stage.addEventListener("drop", e => {
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f){ loadFile(f); return; }
+  const t = e.dataTransfer && e.dataTransfer.getData("text");
+  if (t && t.trim()) renderInto(t, { mode:"paste", name:"pasted.html", original:t });
+});
+
+/* paste a whole page straight from the clipboard */
+document.addEventListener("paste", e => {
+  if (e.target.closest("input,textarea")) return;
+  const t = (e.clipboardData || window.clipboardData).getData("text");
+  if (!t || !t.trim() || !/<[a-z!]/i.test(t)) return;
+  e.preventDefault();
+  renderInto(t, { mode:"paste", name:"squarespace-block.html", original:t });
+  toast("Pasted content rendered");
+});
+
+window.addEventListener("beforeunload", e => {
+  if (statusEl.classList.contains("dirty")){ e.preventDefault(); e.returnValue = ""; }
+});
+
+/* ---------- restore last session ---------- */
+(function restore(){
+  const saved = loadSaved();
+  if (!saved) return;
+  NAME = saved.name || "";
+  ORIGINAL = saved.original || saved.current;
+  renderInto(saved.current, { mode:saved.mode || "file", name:NAME, original:ORIGINAL });
+  setTimeout(() => toast("Restored your last session — RESET clears the page"), 600);
+})();
+</script>
+</body>
+</html>

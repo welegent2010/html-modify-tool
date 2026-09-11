@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Timetable — span-based multi-line rows</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body{background:#111;color:#eee;margin:0;padding:40px;font-family:Georgia,serif}
+  h2{font-size:22px;margin:0 0 22px}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;max-width:900px}
+  .slot{border:1px solid #333;padding:16px;background:#181614}
+  /* every field is a SPAN, stacked with display:block — exactly the shape
+     that used to fool isTextLeaf() into treating the whole card as one
+     editable text blob */
+  .slot .t{display:block;color:#F5BD63;font-size:13px;font-family:Verdana,sans-serif}
+  .slot .n{display:block;font-weight:700;font-size:18px;margin:8px 0 5px}
+  .slot .p{display:block;color:#999;font-size:12px;font-family:Verdana,sans-serif}
+  .btn{display:inline-block;margin-top:30px;position:relative;color:#F5BD63;
+       border:1px solid #F5BD63;padding:12px 22px;text-decoration:none;font-family:Verdana,sans-serif;font-size:12px}
+  .btn .hover{display:none}
+  .btn:hover .rest{display:none}
+  .btn:hover .hover{display:inline}
+</style>
+</head>
+<body>
+<section>
+  <h2>Weekly Schedule</h2>
+  <div class="grid">
+    <div class="slot">
+      <span class="t">09:00</span>
+      <span class="n">Sunrise Vinyasa Flow</span>
+      <span class="p">Maya</span>
+    </div>
+    <div class="slot">
+      <span class="t">12:00</span>
+      <span class="n">Beginner Yoga</span>
+      <span class="p">Maya</span>
+    </div>
+    <div class="slot">
+      <span class="t">16:00</span>
+      <span class="n">Yin &amp; Restore</span>
+      <span class="p">Emma</span>
+    </div>
+  </div>
+  <a class="btn" href="/classes"><span class="rest">Explore Classes</span><span class="hover">See All Classes</span></a>
+</section>
+</body>
+</html>

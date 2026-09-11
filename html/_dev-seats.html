@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Soma Yoga · Seats indicator sample</title>
+<style>
+  body{background:#141211;color:#F3EEE6;font-family:Georgia,serif;margin:0;padding:44px 32px}
+  .wrap{max-width:1020px;margin:0 auto}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+  .card{background:#1D1B1A;padding:18px;border:1px solid #2a2622}
+  .card img{width:100%;aspect-ratio:16/10;object-fit:cover;display:block}
+  .card h3{font-size:22px;margin:14px 0 8px}
+  .card p{color:#b7aea3;font-size:14px;margin:0 0 14px;line-height:1.6}
+  .foot{display:flex;justify-content:space-between;align-items:center;gap:12px;padding-top:14px;border-top:1px solid #2a2622}
+  .book{background:#F5BD63;color:#1D1B1A;text-decoration:none;font-size:12px;padding:10px 16px;font-family:Verdana,sans-serif;letter-spacing:.08em}
+
+  /* style A — class driven (the design used in Classes老师卡片带修改) */
+  .seats{display:flex;align-items:center;gap:10px;font-size:13px;opacity:.85;font-family:Verdana,sans-serif;letter-spacing:.06em}
+  .dots{display:flex;gap:6px}
+  .dots i{display:block;width:28px;height:6px;border-radius:99px;background:#5a544c}
+  .dots i.on{background:#F5BD63}
+  .dots.wide i{width:18px}
+
+  /* style B — inline style driven */
+  .bar-row{display:flex;gap:5px}
+  .bar-row b{display:block;width:24px;height:8px;border-radius:4px}
+
+  /* style C — one colour, dimmed with opacity */
+  .caps{display:flex;gap:6px}
+  .caps i{display:block;width:26px;height:7px;border-radius:99px;background:#F5BD63;opacity:.2}
+
+  /* decoy — a uniform decorative row, must NOT be read as an indicator */
+  .rule{display:inline-flex;gap:8px}
+  .rule span{display:block;width:24px;height:8px;border-radius:99px;background:#2C2926}
+
+  .hint{max-width:1020px;margin:0 auto 22px;color:#6b6258;font-family:Verdana,sans-serif;font-size:12px;letter-spacing:.04em}
+</style>
+</head>
+<body>
+
+<p class="hint">SAMPLE · seats indicator · class-driven, inline-style-driven, 5-bar and decoy rows</p>
+
+<section class="wrap">
+  <div class="grid">
+
+    <article class="card" id="c1">
+      <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 250'%3E%3Crect width='400' height='250' fill='%23201E1C'/%3E%3Ctext x='200' y='132' fill='%23F5BD63' font-family='Verdana' font-size='14' letter-spacing='4' text-anchor='middle'%3EMORNING FLOW%3C/text%3E%3C/svg%3E" alt="Morning Flow">
+      <h3>Morning Flow</h3>
+      <p>Start the day with steady movement, simple strength, and enough energy to feel awake without feeling rushed.</p>
+      <div class="foot">
+        <div class="seats">Seats <span class="dots"><i class="on"></i><i class="on"></i><i></i><i></i></span></div>
+        <a class="book" href="#book-morning">Book</a>
+      </div>
+    </article>
+
+    <article class="card" id="c2">
+      <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 250'%3E%3Crect width='400' height='250' fill='%23201E1C'/%3E%3Ctext x='200' y='132' fill='%23F5BD63' font-family='Verdana' font-size='14' letter-spacing='4' text-anchor='middle'%3EVINYASA FLOW%3C/text%3E%3C/svg%3E" alt="Vinyasa Flow">
+      <h3>Vinyasa Flow</h3>
+      <p>A dynamic, breath-led class combining flowing sequences, strength, balance and focused movement.</p>
+      <div class="foot">
+        <div class="seats">Seats <span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span></div>
+        <a class="book" href="#book-vinyasa">Book</a>
+      </div>
+    </article>
+
+    <article class="card" id="c3">
+      <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 250'%3E%3Crect width='400' height='250' fill='%23201E1C'/%3E%3Ctext x='200' y='132' fill='%23F5BD63' font-family='Verdana' font-size='14' letter-spacing='4' text-anchor='middle'%3EYIN %26 RESTORE%3C/text%3E%3C/svg%3E" alt="Yin and Restore">
+      <h3>Yin &amp; Restore</h3>
+      <p>Slow down with longer holds, supported poses and gentle mobility designed to release tension.</p>
+      <div class="foot">
+        <div class="seats">Seats <span class="dots wide"><i class="on"></i><i></i><i></i><i></i><i></i></span></div>
+        <a class="book" href="#book-yin">Book</a>
+      </div>
+    </article>
+
+    <article class="card" id="c4">
+      <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 250'%3E%3Crect width='400' height='250' fill='%23201E1C'/%3E%3Ctext x='200' y='132' fill='%23F5BD63' font-family='Verdana' font-size='14' letter-spacing='4' text-anchor='middle'%3EYOGA STRENGTH%3C/text%3E%3C/svg%3E" alt="Yoga Strength">
+      <h3>Yoga Strength</h3>
+      <p>Build strength, balance and control through yoga-inspired movement and functional bodyweight training.</p>
+      <div class="foot">
+        <div class="seats">Places <span class="bar-row" style="display:flex;gap:5px"><b style="display:block;width:24px;height:8px;border-radius:4px;background:#F5BD63"></b><b style="display:block;width:24px;height:8px;border-radius:4px;background:#4A443C"></b><b style="display:block;width:24px;height:8px;border-radius:4px;background:#4A443C"></b></span></div>
+        <a class="book" href="#book-strength">Book</a>
+      </div>
+    </article>
+
+    <article class="card" id="c5">
+      <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 250'%3E%3Crect width='400' height='250' fill='%23201E1C'/%3E%3Ctext x='200' y='132' fill='%23F5BD63' font-family='Verdana' font-size='14' letter-spacing='4' text-anchor='middle'%3EWEEKEND SLOW%3C/text%3E%3C/svg%3E" alt="Weekend Slow Flow">
+      <h3>Weekend Slow Flow</h3>
+      <p>An unhurried weekend practice combining gentle flow, mobility and a longer final rest.</p>
+      <div class="foot">
+        <div class="seats">Spots <span class="caps"><i style="opacity:1"></i><i style="opacity:1"></i><i style="opacity:.2"></i><i style="opacity:.2"></i></span></div>
+        <a class="book" href="#book-weekend">Book</a>
+      </div>
+    </article>
+
+  </div>
+</section>
+
+<section class="wrap" style="margin-top:34px">
+  <div class="card" style="max-width:496px">
+    <h3>Decoy row</h3>
+    <p>Four identical decorative blocks in a row — uniform colour, so it is not an indicator and gets no control.</p>
+    <div class="foot">
+      <div class="seats">Status <span class="rule"><span></span><span></span><span></span><span></span></span></div>
+      <a class="book" href="#noop">Fine</a>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

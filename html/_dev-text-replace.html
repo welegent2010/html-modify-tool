@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Repro — text replacement</title>
+<style>
+  body{background:#101010;color:#f2f2f2;font-family:system-ui,sans-serif;margin:0;padding:20px}
+  h1{margin:0 0 8px;font-size:26px}
+  p{margin:6px 0;color:#bdbdbd}
+  a{display:inline-block;padding:10px 16px;border:1px solid #555;color:#f2f2f2;
+    text-decoration:none;margin-right:8px;border-radius:4px}
+  .row{margin:14px 0}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:18px}
+  .card{border:1px solid #2c2c2c;border-radius:6px;padding:14px}
+  .time{font-size:20px;margin:0 0 6px}
+  .time .t{font-weight:700}
+  .time .n{margin-left:2px}
+  footer{border-top:1px solid #2c2c2c;margin-top:20px;padding-top:12px}
+</style>
+</head>
+<body>
+
+<section id="s-main">
+  <h1>Move more, move better</h1>
+  <p>Small-batch classes, certified teachers, and a calm space made for you.</p>
+  <div class="row">
+    <a class="cta" href="booking.html"><span class="label">Book a Class</span><iconify-icon icon="mdi:arrow-right"></iconify-icon></a>
+    <a class="swap" href="classes.html"><span class="label">Explore Class</span><span class="label-hover">Explore Classes</span></a>
+    <a class="plain" href="contact.html">Contact us</a>
+  </div>
+  <p class="calm">A calm room</p>
+  <div class="grid">
+    <div class="card">
+      <h4 class="time"><span class="t">19:30</span><span class="n">Slow Flow</span></h4>
+      <p>Emma &middot; 60 min &middot; all levels welcome</p>
+      <a href="book.html">Book a spot</a>
+    </div>
+    <div class="card">
+      <h4 class="time"><span class="t">07:30</span><span class="n">Morning Flow</span></h4>
+      <p>Maya &middot; 45 min &middot; wake up gently</p>
+      <a href="book.html">Book a spot</a>
+    </div>
+    <div class="card">
+      <h4 class="time"><span class="t">12:00</span><span class="n">Yoga Strength</span></h4>
+      <p>Olivia &middot; 60 min &middot; build steady power</p>
+      <a href="book.html">Book a spot</a>
+    </div>
+  </div>
+</section>
+
+<footer id="s-foot">
+  <p>&copy; 2026 Studio</p>
+</footer>
+
+</body>
+</html>
