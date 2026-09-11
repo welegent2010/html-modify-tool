@@ -14,7 +14,7 @@ Left to right:
 
 - **HTML MODIFY TOOL** — product name.
 - **filename** — the file you currently have open (`no file` before you load anything).
-- **v6.3** — a permanent gold version badge, so a screenshot always tells you which build you are looking at.
+- **build version** — a permanent gold badge (currently `v6.6`) so a screenshot always tells you which build you are looking at.
 - **status** — the transient state: `READY`, `RENDERING…`, `UNSAVED…`, `SAVED 12:09:41`, `SAVE FAILED`. It turns gold when there is unsaved work.
 - **PASTE / OPEN FILE / EXPORT / RESET** — the four actions. EXPORT and RESET stay disabled until a document is loaded.
 
@@ -359,6 +359,9 @@ This project uses simple `MAJOR.MINOR` versioning.
   3. **No length limit.** Any longer text widened its box and pushed the rest of the row. Every
      text/action input now carries a measured `maxlength` (see *Character budgets* above) with an
      `n / max` counter, so the browser refuses the extra keystroke and nothing moves.
+
+  Cumulative test suite: from v6.0's 35 single-suite run to **225 assertions across 7 suites** —
+  regression 44, text-replace 32, meter 50, timetable 35, collapse 28, hover-swap 14, budget 22.
 
 Breaking changes to the editor file (renamed UI elements, changed export format, new mandatory
 dependencies) will bump the major version and ship as a new release. The `.v6-stable.html` snapshot
