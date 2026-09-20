@@ -1,21 +1,34 @@
 <!DOCTYPE html>
 <!--
-  html-editor v6.7 — 2026-09-11 — single-file visual HTML editor
+  html-editor v6.8 — 2026-09-20 — single-file visual HTML editor
   DO NOT EDIT WITHOUT A BACKUP. See README.md.
   Architecture:
     - iframe srcdoc for real <script>/<link>/<web-component> execution
     - body-direct-child section model with own-items / cards split
     - click does not navigate (capture-phase preventDefault)
-    - debounced localStorage autosave; export = file download + clipboard
+    - debounced localStorage autosave; PASTE = clipboard only,
+      EXPORT = file download only (the two used to be one button)
     - indicator rows ("Seats ●●○○") detected from computed background
       colour and driven by a small lit-count control
     - PICTURES ARE EITHER <img> OR background-image: a photo-box styled
       with CSS is a first-class IMAGE item now, not an invisible one
+    - PASTE / IMPORT: PASTE copies the finished page to the clipboard (the
+      way it actually goes back into Squarespace / Aura — no save dialog).
+      IMPORT opens the drawer you paste source HTML into. They were both
+      called PASTE before, which is why the header had to be split.
     - COLLAPSED FIELD CHIPS: every editable field renders as one compact
       row (type badge · short preview · chevron). Its editor (CURRENT
       block + inputs + meter) only exists after the user clicks the chip,
       so a 27-item header is 27 tidy rows instead of 27 open forms.
       Exactly one field is open at a time.
+  v6.8 — one button, one job. EXPORT used to download a file AND copy the
+    html to the clipboard, and the save dialog opened every single time —
+    even though the page almost always goes straight back into a Squarespace
+    / Aura code block by pasting. EXPORT now only downloads; the new PASTE
+    button only copies (navigator.clipboard, with an execCommand fallback
+    for when the file:// origin refuses it). The old PASTE button — the one
+    that opened the drawer you paste *source* html into — is renamed IMPORT,
+    so the header reads IMPORT · OPEN FILE · PASTE · EXPORT · RESET.
   v6.7 — "images I can't reach". scan() only ever looked for <img>, so any
     layout that puts its photos in CSS — the very common
 
@@ -333,19 +346,21 @@
   <div class="divider"></div>
   <span class="filename" id="filename">no file</span>
   <div class="spacer"></div>
-  <span class="version" id="version">v6.7</span>
+  <span class="version" id="version">v6.8</span>
   <span class="status" id="status">READY</span>
   <div class="divider"></div>
-  <button class="ghost" id="btnPaste" type="button">PASTE</button>
+  <!-- IMPORT = pull html in (drawer). PASTE = push html out (clipboard). -->
+  <button class="ghost" id="btnImport" type="button">IMPORT</button>
   <button class="ghost" id="btnOpen" type="button">OPEN FILE</button>
-  <button id="btnExport" type="button" disabled>EXPORT</button>
+  <button id="btnCopy" type="button" disabled>PASTE</button>
+  <button class="ghost" id="btnExport" type="button" disabled>EXPORT</button>
   <button class="ghost" id="btnReset" type="button" disabled>RESET</button>
   <input type="file" id="fileInput" accept=".html,.htm,text/html" hidden />
 </header>
 
 <section class="drawer collapsed" id="drawer">
   <div class="drawer-inner">
-    <div class="drawer-head"><span class="lb">PASTE HTML — SQUARESPACE CODE BLOCK OR FULL PAGE</span></div>
+    <div class="drawer-head"><span class="lb">IMPORT HTML — SQUARESPACE CODE BLOCK OR FULL PAGE</span></div>
     <textarea class="paste" id="pasteInput" placeholder="Paste your HTML here, then press RENDER.&#10;&#10;Tailwind classes, iconify icons and background images render exactly like the browser does."></textarea>
     <div class="drawer-actions">
       <button id="btnRender" type="button">RENDER</button>
@@ -360,7 +375,7 @@
   <div class="stage" id="stage">
     <div class="stage-empty" id="stageEmpty">
       <div class="big">Nothing loaded yet</div>
-      <div class="small">OPEN FILE &nbsp;·&nbsp; drag an .html here &nbsp;·&nbsp; or PASTE<br />Then click anything on the page to edit its text, image or link.</div>
+      <div class="small">OPEN FILE &nbsp;·&nbsp; drag an .html here &nbsp;·&nbsp; or IMPORT<br />Then click anything on the page to edit its text, image or link.</div>
     </div>
     <iframe class="frame" id="frame" title="preview"></iframe>
   </div>
@@ -822,6 +837,7 @@ function renderInto(html, opts){
   stageEmpty.style.display = "none";
   filenameEl.textContent = NAME || "untitled";
   document.getElementById("btnExport").disabled = false;
+  document.getElementById("btnCopy").disabled = false;
   document.getElementById("btnReset").disabled = false;
   setStatus("RENDERING…", true);
 
@@ -2072,17 +2088,58 @@ function loadSaved(){
    ============================================================ */
 function baseName(){ return (NAME || "page").replace(/\.html?$/i, "") + "-" + dateStamp() + ".html"; }
 
+/* Persist the current html — both output buttons do this, neither of them
+   is "the save" (autosave already covers that). */
+function autosave(html){
+  try {
+    localStorage.setItem(KEY, JSON.stringify({ mode:MODE, name:NAME, original:ORIGINAL, current:html, at:Date.now() }));
+  } catch (e) {}
+}
+
+/* navigator.clipboard needs a secure context and can still be refused —
+   a local file:// page is exactly where that happens, so fall back to a
+   throwaway textarea + execCommand. */
+async function writeClipboard(text){
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (e) {}
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.cssText = "position:fixed;top:-2000px;left:0;opacity:0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return !!ok;
+  } catch (e) {}
+  return false;
+}
+
+/* PASTE — the way the page actually goes back into a code block. No dialog. */
+async function doCopy(){
+  const html = serialize();
+  if (!html){ toast("Nothing to copy", true); return; }
+
+  const ok = await writeClipboard(html);
+  if (!ok){
+    toast("Clipboard was blocked — use EXPORT to download instead", true);
+    return;
+  }
+  autosave(html);
+  setStatus("COPIED " + nowStamp());
+  toast("Copied " + html.length.toLocaleString("en-US") + " characters — paste it into the code block");
+}
+
+/* EXPORT — a file on disk. Deliberately does not touch the clipboard. */
 async function doExport(){
   const html = serialize();
   if (!html){ toast("Nothing to export", true); return; }
   const name = baseName();
 
-  try {
-    localStorage.setItem(KEY, JSON.stringify({ mode:MODE, name:NAME, original:ORIGINAL, current:html, at:Date.now() }));
-  } catch (e) {}
-
-  let copied = false;
-  try { await navigator.clipboard.writeText(html); copied = true; } catch (e) {}
+  autosave(html);
 
   const blob = new Blob([html], { type:"text/html;charset=utf-8" });
   const a = document.createElement("a");
@@ -2094,7 +2151,7 @@ async function doExport(){
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 
   setStatus("SAVED " + nowStamp());
-  toast("Exported " + name + (copied ? " · also copied to clipboard" : " · move the file into output/"));
+  toast("Exported " + name + " · move the file into output/");
 }
 
 /* ============================================================
@@ -2122,10 +2179,11 @@ fileInput.onchange = e => {
   fileInput.value = "";
 };
 
-document.getElementById("btnPaste").onclick = () => {
+document.getElementById("btnImport").onclick = () => {
   drawer.classList.toggle("collapsed");
   if (!drawer.classList.contains("collapsed")) pasteInput.focus();
 };
+document.getElementById("btnCopy").onclick = doCopy;
 document.getElementById("btnPasteClear").onclick = () => { pasteInput.value = ""; pasteInput.focus(); };
 document.getElementById("btnRender").onclick = () => {
   const v = pasteInput.value.trim();
@@ -2181,6 +2239,7 @@ function doClear(){
   stageEmpty.style.display = "";
   filenameEl.textContent = "no file";
   document.getElementById("btnExport").disabled = true;
+  document.getElementById("btnCopy").disabled = true;
   document.getElementById("btnReset").disabled = true;
   secStrip.innerHTML = "";
   panelBody.innerHTML = '<p class="panel-empty">Load a page, then click any block on the left — or a section chip above. Click a section\'s blank area to edit its heading, text, buttons and images. Click a card inside it to edit just that card.</p>';

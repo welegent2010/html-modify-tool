@@ -124,7 +124,7 @@ async function gotoSection(page, name){
 </section>
 </body></html>`;
   await page.locator("#pasteInput").evaluate((el, v) => { el.value = v; }, tripleHtml);
-  await page.locator("#btnPaste").click();  // ensure drawer is open (might have been collapsed)
+  await page.locator("#btnImport").click();  // ensure drawer is open (might have been collapsed)
   await page.waitForTimeout(100);
   // Paste render is wired to Ctrl/Cmd+Enter — plain Enter does nothing
   await page.locator("#pasteInput").press("Control+Enter");

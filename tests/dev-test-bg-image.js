@@ -271,13 +271,13 @@ const NEW_CLS  = "https://images.unsplash.com/photo-8888888888888-bbbbbbbbbbbb?w
   ok(styleInExport.indexOf("photo-1558788353") >= 0, "the original CSS url is still spelled as it was");
 
   /* ---------- G. the PASTE workflow sees them too ---------- */
-  console.log("\n=== G. the PASTE workflow ===");
+  console.log("\n=== G. the IMPORT workflow ===");
   const frag = fs.readFileSync(FIXTURE, "utf-8")
     .replace(/^[\s\S]*<body[^>]*>/, "").replace(/<\/body>[\s\S]*$/, "");
   await page.evaluate(() => localStorage.clear());
   await page.reload();
   await page.waitForTimeout(400);
-  await page.locator("#btnPaste").click();
+  await page.locator("#btnImport").click();
   await page.waitForTimeout(300);
   await page.locator("#pasteInput").fill(frag);
   await page.locator("#btnRender").click();

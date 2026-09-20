@@ -14,9 +14,13 @@ Left to right:
 
 - **HTML MODIFY TOOL** — product name.
 - **filename** — the file you currently have open (`no file` before you load anything).
-- **build version** — a permanent gold badge (currently `v6.7`) so a screenshot always tells you which build you are looking at.
-- **status** — the transient state: `READY`, `RENDERING…`, `UNSAVED…`, `SAVED 12:09:41`, `SAVE FAILED`. It turns gold when there is unsaved work.
-- **PASTE / OPEN FILE / EXPORT / RESET** — the four actions. EXPORT and RESET stay disabled until a document is loaded.
+- **build version** — a permanent gold badge (currently `v6.8`) so a screenshot always tells you which build you are looking at.
+- **status** — the transient state: `READY`, `RENDERING…`, `UNSAVED…`, `COPIED 12:09:41`, `SAVED 12:09:41`, `SAVE FAILED`. It turns gold when there is unsaved work.
+- **IMPORT / OPEN FILE / PASTE / EXPORT / RESET** — the five actions. PASTE, EXPORT and RESET stay disabled until a document is loaded.
+  - **IMPORT** opens the drawer you drop *source* HTML into (a Squarespace code block or a whole page). Pressing Cmd/Ctrl+V anywhere in the tool does the same thing.
+  - **OPEN FILE** loads an `.html` file from disk; dragging one onto the preview works too.
+  - **PASTE** copies the finished page to your clipboard — no save dialog, which is what you want when the page is going straight back into a code block.
+  - **EXPORT** downloads a file. It does not touch the clipboard.
 
 The version badge never changes while you work — only the status text does.
 
@@ -26,10 +30,10 @@ The version badge never changes while you work — only the status text does.
 
 1. Download `html-editor.html` from the [latest release](https://github.com/welegent2010/html-modify-tool/releases).
 2. Double-click it. It opens in your default browser — Chrome recommended.
-3. Click **OPEN FILE** on the top bar and pick any `.html` file (or paste a snippet into the box).
+3. Click **OPEN FILE** on the top bar and pick any `.html` file — or click **IMPORT** and paste a snippet into the box.
 4. Click any block on the left. The right pane shows its editable content.
 5. Type your changes. The preview updates live.
-6. Click **EXPORT** to download the edited file (and copy it to your clipboard).
+6. Click **PASTE** to copy the finished page to your clipboard (what you normally want), or **EXPORT** if you need the file on disk.
 
 That is the entire flow. No account, no upload, no telemetry.
 
@@ -201,14 +205,18 @@ Indicator rows (`Seats ●●○○`) are not a separate view — they appear as
 
 ---
 
-## Export
+## Getting the page back out
 
-Click **EXPORT** in the top bar:
+Two buttons, one job each.
 
-- **File mode** (loaded from disk): downloads a full HTML file with the same name plus `-YYYY-MM-DD.html`. The downloaded file is byte-identical to the original except for the text/image/link edits you made — all `<script>`, `<link>`, Tailwind classes, web components, fonts and remote images are preserved.
-- **Paste mode** (snippet only): downloads the inner content of `<body>`, ready to paste into a Squarespace Code Block.
+**PASTE** (the one you want most of the time) copies the finished HTML to your clipboard. Nothing downloads and no dialog appears, so the loop is: edit → PASTE → Cmd+V into the Squarespace / Aura code block. If the browser refuses clipboard access — a `file://` page sometimes does — the editor says so and points you at EXPORT instead of failing silently.
 
-The edited string is also copied to the clipboard as a fallback. The editor never writes back to your original file on disk — you stay in control of where it lands.
+**EXPORT** downloads a file:
+
+- **File mode** (loaded from disk): a full HTML file with the same name plus `-YYYY-MM-DD.html`. It is byte-identical to the original except for the text/image/link edits you made — all `<script>`, `<link>`, Tailwind classes, web components, fonts and remote images are preserved.
+- **Import mode** (snippet only): the inner content of `<body>`, ready to paste into a Squarespace Code Block.
+
+Both write the same bytes and both refresh the autosave. The editor never writes back to your original file on disk — you stay in control of where it lands.
 
 ---
 
@@ -265,7 +273,7 @@ html modify tool/
 │   └── site-files/            # a real Squarespace export (sample material)
 ├── tests/                     # developer-only regression suite, needs Playwright
 │   ├── run-all.sh             # runs every suite in order
-│   ├── dev-regression-test.js # (44)  real Squarespace pages, section/card model, export
+│   ├── dev-regression-test.js # (51)  real Squarespace pages, section/card model, export + clipboard
 │   ├── dev-test-text-replace.js # (32)  text replacement, hover-swap, icons
 │   ├── dev-test-meter.js      # (50)  indicator rows
 │   ├── dev-test-timetable.js  # (35)  multi-line span stacks + a real page
@@ -308,7 +316,7 @@ sh tests/run-all.sh                          # all eight suites
 sh tests/run-all.sh dev-test-budget.js       # or a single one
 ```
 
-All eight run green across repeated runs — 267 assertions.
+All eight run green across repeated runs — 274 assertions.
 
 The character budget makes a field refuse over-long edits, so a fixture that stuffs an 18-character
 string into a 12-character title box will silently lose the tail. Keep test payloads inside the
@@ -417,6 +425,21 @@ This project uses simple `MAJOR.MINOR` versioning.
   Cumulative test suite: **267 assertions across 8 suites** — the seven above plus
   bg-image 42. `_audit-v67.js` measures the split per page: the real export has 93 `<img>` and
   **0** background photos, i.e. this change is purely additive on existing pages.
+- **v6.8** — "one button, one job". EXPORT downloaded a file *and* copied the HTML to the
+  clipboard, so the save dialog opened every single time — even though the page nearly always
+  goes straight back into a code block by pasting.
+
+  - **PASTE** is a new button in the top bar: clipboard only, no dialog. If the browser refuses
+    clipboard access it says so instead of failing silently.
+  - **EXPORT** now only downloads.
+  - The old PASTE — the button that opened the drawer you paste *source* HTML into — is renamed
+    **IMPORT**, so the header reads `IMPORT · OPEN FILE · PASTE · EXPORT · RESET` and each word
+    means one thing.
+  - PASTE and EXPORT produce the same bytes; both refresh the autosave.
+
+  Cumulative test suite: **274 assertions across 8 suites** — regression grows 44 → 51 with the
+  clipboard contract (enabled only after a load, same bytes as EXPORT, no editor markers, status
+  reads `COPIED`).
 
 Breaking changes to the editor file (renamed UI elements, changed export format, new mandatory
 dependencies) will bump the major version and ship as a new release. Every release is tagged on

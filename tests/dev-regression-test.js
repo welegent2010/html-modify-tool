@@ -160,6 +160,25 @@ async function waitForSecs(page, n, timeout = 14000) {
   ok(!html.includes("__edit-card"), "exported HTML has no injected selection classes");
   ok(!html.includes("__hilite"), "exported HTML has no injected highlight style");
 
+  console.log("\n=== H2. PASTE copies the page to the clipboard ===");
+  await page.evaluate(() => {
+    window.__copied = null;
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: t => { window.__copied = t; return Promise.resolve(); } }
+    });
+  });
+  ok(await page.locator("#btnCopy").isEnabled(), "PASTE is enabled once a page is loaded");
+  await page.locator("#btnCopy").click();
+  await page.waitForTimeout(400);
+  const copied = await page.evaluate(() => window.__copied);
+  ok(typeof copied === "string" && copied.length > 0, "PASTE put something on the clipboard");
+  ok(copied.includes("MODIFIED_V6"), "the clipboard copy contains the edit");
+  ok(!copied.includes("__edit-card") && !copied.includes("__hilite"), "the clipboard copy has no editor markers");
+  ok(copied === html, "PASTE and EXPORT produce the same bytes");
+  const st2 = await page.locator("#status").textContent();
+  ok(/COPIED/.test(st2), "the status line says COPIED (" + st2.trim() + ")");
+
   console.log("\n=== I. RESET clears everything ===");
   await page.locator("#btnReset").click();
   await page.waitForTimeout(700);
@@ -168,6 +187,7 @@ async function waitForSecs(page, n, timeout = 14000) {
   ok(await page.evaluate(() => document.getElementById("stageEmpty").style.display !== "none"), "empty stage shown");
   ok(await page.locator("#btnReset").isDisabled(), "RESET disabled");
   ok(await page.locator("#btnExport").isDisabled(), "EXPORT disabled");
+  ok(await page.locator("#btnCopy").isDisabled(), "PASTE disabled");
   const ls = await page.evaluate(() => localStorage.getItem("htmlModifyTool_v4"));
   ok(ls === null, "localStorage cleared");
 
