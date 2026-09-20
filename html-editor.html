@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  html-editor v6.8 — 2026-09-20 — single-file visual HTML editor
+  html-editor v6.9 — 2026-09-20 — single-file visual HTML editor
   DO NOT EDIT WITHOUT A BACKUP. See README.md.
   Architecture:
     - iframe srcdoc for real <script>/<link>/<web-component> execution
@@ -21,6 +21,21 @@
       block + inputs + meter) only exists after the user clicks the chip,
       so a 27-item header is 27 tidy rows instead of 27 open forms.
       Exactly one field is open at a time.
+  v6.9 — "the hero photo is still missing". v6.7 recognised a background
+    photo only when the element had NO content of its own, so the two most
+    common layouts stayed invisible:
+
+      <body><div class="hero" style="background-image:url(…)">
+              <h2>Walk With Me</h2> …          ← photo behind the copy
+      <div class="band"></div>                  ← .band::before paints it
+      <figure style="background-image:url(…)"><svg class="badge">…</svg>
+
+    A backdrop photo no longer stops the walk — the section keeps every
+    text / link / button item AND gains the picture. photos painted by
+    ::before / ::after are detected too, and rewritten by appending one
+    rule instead of touching any existing CSS. What is still refused, on
+    purpose: gradients, solid colours, data: URIs, repeating patterns
+    (background-repeat without cover/contain) and boxes under 32px.
   v6.8 — one button, one job. EXPORT used to download a file AND copy the
     html to the clipboard, and the save dialog opened every single time —
     even though the page almost always goes straight back into a Squarespace
@@ -346,7 +361,7 @@
   <div class="divider"></div>
   <span class="filename" id="filename">no file</span>
   <div class="spacer"></div>
-  <span class="version" id="version">v6.8</span>
+  <span class="version" id="version">v6.9</span>
   <span class="status" id="status">READY</span>
   <div class="divider"></div>
   <!-- IMPORT = pull html in (drawer). PASTE = push html out (clipboard). -->
@@ -507,6 +522,26 @@ function bgUrlIn(text){
   return m ? m[2].trim() : null;
 }
 
+/* Is this url actually a PHOTO rather than a sprite, a gradient or a
+   repeating texture? A data: URI is always decoration or a placeholder. */
+const PHOTO_EXT_RE = /\.(jpe?g|png|webp|avif|gif|svg)(\?|#|$)/i;
+const PHOTO_HOST_RE = /(unsplash|pexels|pixabay|cloudinary|imgix|shopify|shopifycdn|amazonaws|googleapis|cloudfront|images\.squarespace|static1\.squarespace)/i;
+function looksLikePhoto(u){
+  if (!u) return false;
+  if (/^data:/i.test(u)) return false;
+  return PHOTO_EXT_RE.test(u) || PHOTO_HOST_RE.test(u);
+}
+
+/* A photo is painted either with background-size:cover / contain, or as a
+   single non-tiled image. Anything that really tiles at its natural size is
+   a PATTERN, not a picture people want replaced. */
+function paintedNotTiled(cs){
+  const size = (cs && cs.backgroundSize) || "";
+  if (/cover|contain/.test(size)) return true;
+  const rep = (cs && cs.backgroundRepeat) || "repeat";
+  return !/repeat/.test(rep);
+}
+
 /* where does this element's background photo come from?
    "inline-image"     style="background-image:url(…)"   → edit in place
    "inline-shorthand" style="background:url(…) …"       → edit in place
@@ -542,6 +577,50 @@ function bgPictureInfo(el){
   return info;
 }
 
+/* BACKDROP (v6.9): the element has content OF ITS OWN — hero copy over a
+   photo, an icon badge on a tile, a testimonial on a gradient-tinted image
+   — but the picture behind it is still a picture the user wants to swap.
+   v6.7 insisted on "no text anywhere inside", which silently skipped the
+   single most common layout there is: a full-width photo with the heading
+   sitting on top of it. */
+function photoBackdrop(el){
+  if (!el || el.nodeType !== 1) return null;
+  if (el.tagName === "IMG" || el.tagName === "BODY" || el.tagName === "HTML") return null;
+  /* cheap gate first: no class and no style means nothing authored drew
+     a picture here, and skip it before touching getComputedStyle. */
+  if (!el.getAttribute("class") && !el.getAttribute("style")) return null;
+  const info = bgImageInfo(el);
+  if (!info || !looksLikePhoto(info.url)) return null;   /* colour / gradient */
+  const win = el.ownerDocument.defaultView;
+  if (!win) return null;
+  if (!paintedNotTiled(win.getComputedStyle(el))) return null;  /* a pattern */
+  const r = el.getBoundingClientRect();
+  if (r.width < 32 || r.height < 32) return null;        /* icons, hairlines */
+  return info;
+}
+
+/* PSEUDO BACKDROP (v6.9): plenty of templates paint the photo from
+   ::before / ::after instead of the element itself — invisible to anything
+   reading computed style off the element. This is a per-element cost, so it
+   stays gated behind the same "authored styling" test. */
+function pseudoBackdrop(el){
+  if (!el || el.nodeType !== 1) return null;
+  if (el.tagName === "IMG" || el.tagName === "BODY" || el.tagName === "HTML") return null;
+  if (!el.getAttribute("class") && !el.getAttribute("style")) return null;
+  const win = el.ownerDocument.defaultView;
+  if (!win) return null;
+  const r = el.getBoundingClientRect();
+  if (r.width < 80 || r.height < 80) return null;
+  for (const pe of ["::before", "::after"]){
+    const cs = win.getComputedStyle(el, pe);
+    const u = bgUrlIn(cs && cs.backgroundImage);
+    if (!u || !looksLikePhoto(u)) continue;
+    if (!paintedNotTiled(cs) && r.width * r.height < 20000) continue;  /* a tile */
+    return { url:u, src:"pseudo", pseudo:pe };
+  }
+  return null;
+}
+
 /* Layout-free "is there anything in here at all?" — used by the section
    gate, which runs on a 400 ms timer and must stay cheap. A photo box can
    be <div class="hero-photo"></div> — no text, no children, no inline
@@ -556,8 +635,39 @@ function hasAnyContent(ch){
 /* read an image item's url, whichever way it is stored */
 function imageSrc(it){
   if (!it) return "";
+  if (it.pseudo){
+    const win = it.el.ownerDocument.defaultView;
+    const cs = win && win.getComputedStyle(it.el, it.pseudo);
+    return bgUrlIn(cs && cs.backgroundImage) || "";
+  }
   if (it.bg){ const i = bgImageInfo(it.el); return i ? i.url : ""; }
   return it.el.getAttribute("src") || "";
+}
+
+/* A photo painted by a pseudo-element has no attribute to edit — the only
+   safe place for the new url is an extra rule. Tag the element once with a
+   stable hook (also harmless in the export) and append one line to a style
+   block we own; later edits replace that line instead of piling up. */
+const PSEUDO_STYLE_ID = "hmt-pseudo-bg";
+let PSEUDO_SEQ = 0;
+
+function setPseudoBg(el, pseudo, url){
+  const doc = el.ownerDocument;
+  if (!doc || !doc.head) return;
+  let hook = el.getAttribute("data-hmt-bg");
+  if (!hook){ hook = "h" + (++PSEUDO_SEQ); el.setAttribute("data-hmt-bg", hook); }
+  let st = doc.getElementById(PSEUDO_STYLE_ID);
+  if (!st){
+    st = doc.createElement("style");
+    st.id = PSEUDO_STYLE_ID;
+    doc.head.appendChild(st);
+  }
+  const sel  = '[data-hmt-bg="' + hook + '"]' + pseudo;
+  const val  = url ? 'url("' + url.replace(/"/g, '\\"') + '")' : "none";
+  const line = sel + "{background-image:" + val + "}";
+  const lines = st.textContent.split("\n").filter(l => l.indexOf(sel + "{") !== 0);
+  lines.push(line);
+  st.textContent = lines.join("\n");
 }
 
 /* write it back WITHOUT touching the page's stylesheet: an inline value is
@@ -565,6 +675,7 @@ function imageSrc(it){
    one gets one inline override rather than a rewrite of the CSS rule. */
 function setBgImage(it, url){
   const el = it.el;
+  if (it.pseudo){ setPseudoBg(el, it.pseudo, url); return; }
   const info = bgImageInfo(el);
   if (!info) return;
   const val = url ? 'url("' + url.replace(/"/g, '\\"') + '")' : "none";
@@ -613,6 +724,19 @@ function isTextLeaf(el){
   return true;
 }
 
+/* every shape in which a background picture can hang off an element,
+   returned as one image item — the childless photo box (v6.7), a photo
+   behind content, or one painted by a pseudo-element (v6.9). */
+function photoItem(el){
+  if (!el || el.nodeType !== 1) return null;
+  if (bgPictureInfo(el)) return { kind:"image", el, bg:true, bgSrc:bgImageInfo(el).src };
+  const back = photoBackdrop(el);
+  if (back) return { kind:"image", el, bg:true, bgSrc:back.src, backdrop:true };
+  const pse = pseudoBackdrop(el);
+  if (pse) return { kind:"image", el, bg:true, bgSrc:"pseudo", pseudo:pse.pseudo };
+  return null;
+}
+
 function scan(el, out){
   if (!el || el.nodeType !== 1) return;
   if (SKIP.has(el.tagName)) return;
@@ -620,9 +744,20 @@ function scan(el, out){
 
   if (el.tagName === "IMG"){ out.push({ kind:"image", el }); return; }
 
-  /* a photo-box built from background-image rather than an <img> (v6.7) */
-  const bgp = bgPictureInfo(el);
-  if (bgp){ out.push({ kind:"image", el, bg:true, bgSrc:bgp.src }); return; }
+  /* a photo-box built from background-image rather than an <img> (v6.7):
+     nothing inside it, so there is nothing else to expose — stop here. */
+  if (bgPictureInfo(el)){
+    out.push({ kind:"image", el, bg:true, bgSrc:bgImageInfo(el).src });
+    return;
+  }
+
+  /* v6.9 — the photo may sit behind content (a hero with copy on top) or be
+     painted by ::before / ::after. Those do NOT stop the walk: everything
+     inside stays editable in its own right. */
+  const back = photoBackdrop(el);
+  if (back) out.push({ kind:"image", el, bg:true, bgSrc:back.src, backdrop:true });
+  const pse = pseudoBackdrop(el);
+  if (pse) out.push({ kind:"image", el, bg:true, bgSrc:"pseudo", pseudo:pse.pseudo });
 
   if (el.tagName === "A" || el.tagName === "BUTTON"){
     /* A link/button whose label is built from SEVERAL stacked lines (the
@@ -635,11 +770,13 @@ function scan(el, out){
     const stacked = stackedTextBlocks(el) >= 2;
     out.push({ kind:"action", el, noText: stacked });
     el.querySelectorAll("img").forEach(im => { if (!isInjected(im)) out.push({ kind:"image", el:im }); });
-    /* a linked photo tile — <a><div style="background-image:url(…)"></div></a> */
+    /* a linked photo tile — <a><div style="background-image:url(…)"></div></a>
+       Anything that carries a picture, including the v6.9 backdrop and
+       pseudo-element shapes, not just the childless photo box. */
     for (const box of el.querySelectorAll("*")){
       if (box.tagName === "IMG" || isInjected(box)) continue;
-      const info = bgPictureInfo(box);
-      if (info) out.push({ kind:"image", el:box, bg:true, bgSrc:info.src });
+      const itm = photoItem(box);
+      if (itm) out.push(itm);
     }
     if (stacked) for (const c of el.children) scan(c, out);
     return;
@@ -699,6 +836,14 @@ function scanSection(sectionEl){
     scan(sectionEl, ownItems);
     return { ownItems, cards: [] };
   }
+
+  /* v6.9 — when <body>'s own child IS the hero band, the photo that is on
+     that root used to be unreachable: nothing scans the section root itself.
+     Add it as an item, then carry on and expose everything inside as usual. */
+  const rootBack = photoBackdrop(sectionEl);
+  if (rootBack) ownItems.push({ kind:"image", el:sectionEl, bg:true, bgSrc:rootBack.src, backdrop:true });
+  const rootPse = pseudoBackdrop(sectionEl);
+  if (rootPse) ownItems.push({ kind:"image", el:sectionEl, bg:true, bgSrc:"pseudo", pseudo:rootPse.pseudo });
 
   for (const ch of sectionEl.children){
     if (SKIP.has(ch.tagName)) continue;
@@ -1312,7 +1457,8 @@ function roBlock(it){
     const alt = it.bg ? "" : (it.el.getAttribute("alt") || "");
     const where = it.bg
       ? (it.bgSrc === "css" ? "set by a CSS rule — the new URL is written as an inline override"
-                            : "set inline on this element")
+        : it.bgSrc === "pseudo" ? "painted by " + it.pseudo + " — the new URL is added as one extra rule"
+        : "set inline on this element")
       : "";
     return '<div class="ro"><span class="k">CURRENT IMAGE</span>' +
       (src ? '<img src="' + esc(src) + '" alt="" />' : '<i style="color:#5F584F">no src</i>') +
@@ -1369,7 +1515,9 @@ function itemHTML(it, refKey){
           ? 'This photo is a <b>background-image</b>' +
             (it.bgSrc === "css"
               ? ' set by a CSS rule. The new URL is written as an inline override on this element, so the stylesheet is never touched.'
-              : ' written inline on this element. Size, crop and position stay exactly as set.')
+              : it.bgSrc === "pseudo"
+                ? ' painted by this element’s <b>' + it.pseudo + '</b> pseudo-element. The new URL is added as one extra rule at the end of the page, leaving your own CSS untouched.'
+                : ' written inline on this element. Size, crop and position stay exactly as set.')
           : 'Size and crop stay exactly as set in your CSS.') +
       '</p>';
   }
@@ -1420,7 +1568,8 @@ function currentPreview(it){
   if (it.kind === "image"){
     let src = imageSrc(it) || "(no src)";
     if (src.length > 32) src = src.slice(0, 30) + "…";
-    return (it.bg ? '<i class="empty">bg</i> ' : "") + esc(src);
+    const tag = it.pseudo ? "bg " + it.pseudo : (it.bg ? "bg" : "");
+    return (tag ? '<i class="empty">' + tag + '</i> ' : "") + esc(src);
   }
   let t = it.el.textContent.trim().replace(/\s+/g," ");
   if (!t) return '<i class="empty">(empty)</i>';

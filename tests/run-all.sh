@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 NODE=/Users/xiaodongwang/.workbuddy/binaries/node/versions/22.22.2-3/bin/node
 export NODE_PATH=/Users/xiaodongwang/.workbuddy/binaries/node/workspace/node_modules
 
-SUITES="dev-regression-test.js dev-test-text-replace.js dev-test-meter.js dev-test-timetable.js dev-test-collapse.js dev-test-hover-swap.js dev-test-budget.js dev-test-bg-image.js"
+SUITES="dev-regression-test.js dev-test-text-replace.js dev-test-meter.js dev-test-timetable.js dev-test-collapse.js dev-test-hover-swap.js dev-test-budget.js dev-test-bg-image.js dev-test-backdrop.js"
 
 if [ -n "$1" ]; then SUITES="$1"; fi
 

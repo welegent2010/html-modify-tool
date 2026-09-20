@@ -14,7 +14,7 @@ Left to right:
 
 - **HTML MODIFY TOOL** — product name.
 - **filename** — the file you currently have open (`no file` before you load anything).
-- **build version** — a permanent gold badge (currently `v6.8`) so a screenshot always tells you which build you are looking at.
+- **build version** — a permanent gold badge (currently `v6.9`) so a screenshot always tells you which build you are looking at. **If the badge does not say at least v6.7 you are running an old copy** — open `html-editor.html` from this folder, not a downloaded one.
 - **status** — the transient state: `READY`, `RENDERING…`, `UNSAVED…`, `COPIED 12:09:41`, `SAVED 12:09:41`, `SAVE FAILED`. It turns gold when there is unsaved work.
 - **IMPORT / OPEN FILE / PASTE / EXPORT / RESET** — the five actions. PASTE, EXPORT and RESET stay disabled until a document is loaded.
   - **IMPORT** opens the drawer you drop *source* HTML into (a Squarespace code block or a whole page). Pressing Cmd/Ctrl+V anywhere in the tool does the same thing.
@@ -59,12 +59,25 @@ Only one chip is open at a time — clicking another closes the first, so the pa
 ```html
 <div class="route-img" style="background-image:url('…')"></div>
 <div class="avatar"></div>            <!-- .avatar { background-image: url(…) } -->
+<div class="hero-band" style="background:url('…') center/cover no-repeat"><h2>…copy on top…</h2></div>
+<div class="band"></div>              <!-- .band::before { background-image: url(…) } -->
 ```
 
-A rendered box with no text of its own whose background holds a `url()` is an `IMAGE` chip like any other — its chip shows a small `bg` marker. Gradients are ignored (a gradient is not a photo), and so are content cards, translucent panels and hairline spacers. Where the URL is written back matters, and the editor picks the right place by itself:
+A box whose background holds a photo `url()` is an `IMAGE` chip like any other — its chip shows a small `bg` marker (or `bg ::before` when a pseudo-element paints it). Three shapes are recognised, and the copy that sits on top of the photo stays fully editable:
+
+| shape | chip marker | what stays editable |
+| --- | --- | --- |
+| a childless photo box | `bg` | — nothing else in it |
+| a photo **behind** content (hero band, tile with a badge) | `bg` | every text / link / button inside it |
+| a photo painted by `::before` / `::after` | `bg ::before` | every text / link / button inside it |
+
+Deliberately **not** treated as photos: gradients, flat colours, `data:` URIs, repeating patterns (tiled at natural size without `cover`/`contain`), and boxes smaller than 32px. If the hero band is itself a direct child of `<body>`, its photo is exposed too — nothing above it gets scanned otherwise.
+
+Where the URL is written back matters, and the editor picks the right place by itself:
 
 - **inline** (`background-image`, or the `background` shorthand) — edited in place, so extra layers, position and size survive untouched. A `background: url(a), linear-gradient(…)` keeps its gradient.
 - **a CSS rule** — a single inline override is written on that one element. **The stylesheet is never modified**, which keeps the "content edits only" promise intact.
+- **a pseudo-element** — there is no attribute to edit, so the element gets a stable `data-hmt-bg` hook and one rule is appended (later edits replace that line instead of piling up). The page's own stylesheet stays untouched here too.
 
 A background photo has no `alt` attribute, so the ALT field is hidden for it rather than offered and ignored.
 
@@ -281,13 +294,16 @@ html modify tool/
 │   ├── dev-test-hover-swap.js # (14)  hover-swap labels stay in sync
 │   ├── dev-test-budget.js     # (22)  character budgets, multi-line labels, no reflow
 │   ├── dev-test-bg-image.js   # (42)  background-image photos, CSS untouched
+│   ├── dev-test-backdrop.js   # (41)  photos behind copy, ::before photos, decoys
 │   ├── _audit-v66.js          # split audit across all 15 real pages
 │   ├── _audit-v67.js          # picture audit — <img> vs background photos, per page
+│   ├── _audit-v69.js          # what the backdrop detector ADDS on real pages
 │   ├── _example-hero.html     # fixtures: one per suite
 │   ├── _dev-text-replace.html
 │   ├── _dev-seats.html        #   seats indicator sample (all four techniques + a decoy)
 │   ├── _dev-timetable.html    #   stacked-span fields + a hover-swap button
-│   └── _dev-bg-image.html     #   background-image photos: inline, CSS-rule, inside a link
+│   ├── _dev-bg-image.html     #   background-image photos: inline, CSS-rule, inside a link
+│   └── _dev-backdrop.html     #   hero behind copy, ::before photo, icon badge + 5 decoys
 └── output/                    # exports land here
 ```
 
@@ -312,11 +328,11 @@ A single blocked image (e.g. a 404 on a remote CDN) makes the `load` event never
 ```bash
 # Playwright must be installed first (one-time) — see tests/run-all.sh for the binary path
 
-sh tests/run-all.sh                          # all eight suites
+sh tests/run-all.sh                          # all nine suites
 sh tests/run-all.sh dev-test-budget.js       # or a single one
 ```
 
-All eight run green across repeated runs — 274 assertions.
+All nine run green across repeated runs — 315 assertions.
 
 The character budget makes a field refuse over-long edits, so a fixture that stuffs an 18-character
 string into a 12-character title box will silently lose the tail. Keep test payloads inside the
@@ -342,6 +358,10 @@ Three throwaway audits worth repeating whenever the scanner changes:
   are background photos. **v6.7 measured the real export: 93 `<img>`, 0 background photos.** That
   is the point — the Aura/Squarespace pages were already fine, so the new rule is purely additive
   and cannot change any existing page's item list. It is the hand-written layouts that need it.
+- **backdrop audit** (`_audit-v69.js`) — every element the v6.9 detector reaches that v6.7 did not,
+  listed with size, `background-size` and filename. **v6.9 added exactly 2 across the same 14
+  pages** (`booking.html` 768×274, `index.html` 980×420 — both `cover`, both real jpgs), so the
+  wider rule adds no noise on production pages.
 
 ---
 
@@ -440,6 +460,28 @@ This project uses simple `MAJOR.MINOR` versioning.
   Cumulative test suite: **274 assertions across 8 suites** — regression grows 44 → 51 with the
   clipboard contract (enabled only after a load, same bytes as EXPORT, no editor markers, status
   reads `COPIED`).
+- **v6.9** — "the hero photo is still missing". v6.7 only recognised a background picture when the
+  element had **no content of its own**, so the two most common layouts stayed invisible:
+
+  ```html
+  <div class="hero-band" style="background:url('…') center/cover no-repeat">
+    <h2>Walk With Me</h2> …           <!-- photo BEHIND the copy -->
+  <div class="band"></div>             <!-- .band::before paints it -->
+  <figure style="background-image:url(…)"><svg class="badge">…</svg>
+  ```
+
+  - A **backdrop photo** no longer stops the walk: the section keeps every text / link / button
+    chip *and* gains the picture. A hero band that is itself a direct child of `<body>` is covered
+    too — nothing above it ever gets scanned otherwise.
+  - Photos painted by `::before` / `::after` are detected. There is no attribute to edit, so the
+    element gets a `data-hmt-bg` hook and one appended rule; later edits replace that line instead
+    of piling up, and the page stylesheet stays byte-identical.
+  - Still refused, on purpose: gradients, flat colours, `data:` URIs, patterns that tile at natural
+    size without `cover`/`contain`, and boxes under 32px. Each decoy has its own assertion.
+  - `_audit-v69.js` on the same 14 real pages: **+2 image items, both genuine photos** — the wider
+    rule adds nothing to production pages.
+
+  Cumulative test suite: **315 assertions across 9 suites** — the eight above plus backdrop 41.
 
 Breaking changes to the editor file (renamed UI elements, changed export format, new mandatory
 dependencies) will bump the major version and ship as a new release. Every release is tagged on
