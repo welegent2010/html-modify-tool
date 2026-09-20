@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  html-editor v6.4 — 2026-09-11 — single-file visual HTML editor
+  html-editor v6.7 — 2026-09-11 — single-file visual HTML editor
   DO NOT EDIT WITHOUT A BACKUP. See README.md.
   Architecture:
     - iframe srcdoc for real <script>/<link>/<web-component> execution
@@ -9,11 +9,31 @@
     - debounced localStorage autosave; export = file download + clipboard
     - indicator rows ("Seats ●●○○") detected from computed background
       colour and driven by a small lit-count control
+    - PICTURES ARE EITHER <img> OR background-image: a photo-box styled
+      with CSS is a first-class IMAGE item now, not an invisible one
     - COLLAPSED FIELD CHIPS: every editable field renders as one compact
       row (type badge · short preview · chevron). Its editor (CURRENT
       block + inputs + meter) only exists after the user clicks the chip,
       so a 27-item header is 27 tidy rows instead of 27 open forms.
       Exactly one field is open at a time.
+  v6.7 — "images I can't reach". scan() only ever looked for <img>, so any
+    layout that puts its photos in CSS — the very common
+
+      <div class="route-img" style="background-image:url('…')"></div>
+      <div class="avatar"></div>       /* .avatar{background-image:url(…)} */
+
+    produced ZERO image items: the images were on screen but absent from the
+    panel, and there was no way to swap a url. A "picture box" (rendered,
+    no text of its own, no <img>/<svg>/<video> inside) whose background
+    holds a url() is now an IMAGE item like any other. Gradients are
+    ignored (a gradient is not a photo), and the tool remembers whether the
+    url came from an inline style or a CSS rule:
+      · inline (background-image or the background shorthand) → edited in
+        place, so extra layers, position and size survive untouched;
+      · CSS rule → a single inline override is written. The stylesheet is
+        never modified, which keeps rule 6 intact.
+    background-image items have no alt attribute, so the ALT field is
+    hidden for them.
   v6.4 — the "密集恐惧症" fix. ownItems used to be dumped straight into
     the right rail as a stack of open editors (header sections hit 27
     inputs at once). Each ownItem is now a collapsed chip that expands
@@ -313,7 +333,7 @@
   <div class="divider"></div>
   <span class="filename" id="filename">no file</span>
   <div class="spacer"></div>
-  <span class="version" id="version">v6.6</span>
+  <span class="version" id="version">v6.7</span>
   <span class="status" id="status">READY</span>
   <div class="divider"></div>
   <button class="ghost" id="btnPaste" type="button">PASTE</button>
@@ -449,6 +469,99 @@ function isInjected(el){
   if (el.id && el.id.indexOf(INJ_PREFIX) === 0) return true;
   return false;
 }
+
+/* ============================================================
+   background photos (v6.7)
+   ------------------------------------------------------------
+   A huge share of "image" blocks out there carry the photo as a CSS
+   background, not as an <img>:
+
+     <div class="route-img" style="background-image:url('…')"></div>
+     <div class="avatar"></div>            (with .avatar styled by a class)
+
+   Until v6.7 scan() only recognised <img>, so a page built this way offered
+   zero editable images — every "photo" was invisible to the tool. We now
+   recognise both, and remember WHERE the url lives (inline value vs a CSS
+   rule) so the write-back can respect it. See setBgImage().
+   ============================================================ */
+const BG_URL_RE = /url\(\s*(['"]?)([^'")]+)\1\s*\)/i;
+
+function bgUrlIn(text){
+  if (!text) return null;
+  const m = String(text).match(BG_URL_RE);
+  return m ? m[2].trim() : null;
+}
+
+/* where does this element's background photo come from?
+   "inline-image"     style="background-image:url(…)"   → edit in place
+   "inline-shorthand" style="background:url(…) …"       → edit in place
+   "css"              a class sets it                   → inline override  */
+function bgImageInfo(el){
+  if (!el || el.nodeType !== 1) return null;
+  const st = el.style;
+  if (st){
+    let u = bgUrlIn(st.backgroundImage);
+    if (u) return { url:u, src:"inline-image" };
+    u = bgUrlIn(st.background);
+    if (u) return { url:u, src:"inline-shorthand" };
+  }
+  const win = el.ownerDocument.defaultView;
+  if (!win) return null;
+  const u2 = bgUrlIn(win.getComputedStyle(el).backgroundImage);
+  return u2 ? { url:u2, src:"css" } : null;
+}
+
+/* A PICTURE BOX: a rendered box whose entire visible content is a
+   background photo — no text of its own, no real <img>/<svg>/<video>
+   inside. The "no text" clause is what keeps a big content card (whose
+   background is a colour or a gradient) from being mistaken for a photo. */
+function bgPictureInfo(el){
+  if (!el || el.nodeType !== 1) return null;
+  if (!el.getAttribute("class") && !el.getAttribute("style")) return null;
+  if (el.textContent && el.textContent.trim()) return null;
+  if (el.querySelector("img,picture,svg,video,canvas,iframe")) return null;
+  const info = bgImageInfo(el);
+  if (!info) return null;
+  const r = el.getBoundingClientRect();
+  if (r.width < 8 || r.height < 8) return null;   /* ignore hairlines/spacers */
+  return info;
+}
+
+/* Layout-free "is there anything in here at all?" — used by the section
+   gate, which runs on a 400 ms timer and must stay cheap. A photo box can
+   be <div class="hero-photo"></div> — no text, no children, no inline
+   style — so a class attribute alone has to qualify it. Whatever survives
+   the gate still has to yield at least one item to become a section. */
+function hasAnyContent(ch){
+  if (!ch || ch.nodeType !== 1) return false;
+  return !!(ch.textContent.trim() || ch.children.length ||
+            ch.getAttribute("class") || ch.getAttribute("style"));
+}
+
+/* read an image item's url, whichever way it is stored */
+function imageSrc(it){
+  if (!it) return "";
+  if (it.bg){ const i = bgImageInfo(it.el); return i ? i.url : ""; }
+  return it.el.getAttribute("src") || "";
+}
+
+/* write it back WITHOUT touching the page's stylesheet: an inline value is
+   edited in place (shorthand and gradient layers survive), a class-driven
+   one gets one inline override rather than a rewrite of the CSS rule. */
+function setBgImage(it, url){
+  const el = it.el;
+  const info = bgImageInfo(el);
+  if (!info) return;
+  const val = url ? 'url("' + url.replace(/"/g, '\\"') + '")' : "none";
+  if (info.src === "inline-image"){
+    el.style.backgroundImage = el.style.backgroundImage.replace(BG_URL_RE, () => val);
+  } else if (info.src === "inline-shorthand"){
+    el.style.background = el.style.background.replace(BG_URL_RE, () => val);
+  } else {
+    el.style.backgroundImage = val;
+  }
+}
+
 function isTextLeaf(el){
   if (!el.textContent || !el.textContent.trim()) return false;
   /* collect the direct children that actually carry text */
@@ -492,6 +605,10 @@ function scan(el, out){
 
   if (el.tagName === "IMG"){ out.push({ kind:"image", el }); return; }
 
+  /* a photo-box built from background-image rather than an <img> (v6.7) */
+  const bgp = bgPictureInfo(el);
+  if (bgp){ out.push({ kind:"image", el, bg:true, bgSrc:bgp.src }); return; }
+
   if (el.tagName === "A" || el.tagName === "BUTTON"){
     /* A link/button whose label is built from SEVERAL stacked lines (the
        logo <a> wrapping <div class="flex flex-col"><span>SAMA</span>
@@ -503,6 +620,12 @@ function scan(el, out){
     const stacked = stackedTextBlocks(el) >= 2;
     out.push({ kind:"action", el, noText: stacked });
     el.querySelectorAll("img").forEach(im => { if (!isInjected(im)) out.push({ kind:"image", el:im }); });
+    /* a linked photo tile — <a><div style="background-image:url(…)"></div></a> */
+    for (const box of el.querySelectorAll("*")){
+      if (box.tagName === "IMG" || isInjected(box)) continue;
+      const info = bgPictureInfo(box);
+      if (info) out.push({ kind:"image", el:box, bg:true, bgSrc:info.src });
+    }
     if (stacked) for (const c of el.children) scan(c, out);
     return;
   }
@@ -550,12 +673,14 @@ function scanSection(sectionEl){
   const ownItems = [];
   const cardsContainers = [];
 
-  /* If the section root IS an action (an <a> or <button> placed directly
-     on the body — common for a "Book a Class" pill that lives outside any
-     wrapper), scan the root itself, not its children. Iterating children
-     would expose every text-bearing descendant as its own field and break
-     a hover-swap pair (the two labels become two items). */
-  if (sectionEl.tagName === "A" || sectionEl.tagName === "BUTTON"){
+  /* If the section root IS the editable thing — a floating <a>/<button>
+     pill placed directly on the body, an <img>, or a background-photo box
+     (which by definition has no children at all) — scan the root itself,
+     not its children. Iterating children would either find nothing (a
+     photo box is childless) or expose every text-bearing descendant as its
+     own field and break a hover-swap pair. */
+  if (sectionEl.tagName === "A" || sectionEl.tagName === "BUTTON" ||
+      sectionEl.tagName === "IMG" || bgPictureInfo(sectionEl)){
     scan(sectionEl, ownItems);
     return { ownItems, cards: [] };
   }
@@ -594,7 +719,7 @@ function itemTag(it){ return it.el.tagName.toLowerCase() + (it.el.id ? "#" + it.
 
 function itemLabel(it){
   if (it.kind === "image"){
-    const src = it.el.getAttribute("src") || "";
+    const src = imageSrc(it);
     const f = src.replace(/^https?:\/\//, "").split(/[?#]/)[0].split("/").pop();
     return f ? f.slice(0,30) : "(no src)";
   }
@@ -618,7 +743,7 @@ function buildSections(doc){
   const tops = [...body.children].filter(ch =>
     !SKIP.has(ch.tagName) &&
     !(ch.id && ch.id.indexOf(INJ_PREFIX) === 0) &&
-    (ch.textContent.trim() || ch.querySelector("img"))
+    hasAnyContent(ch)
   );
 
   for (const top of tops){
@@ -1167,12 +1292,17 @@ function refreshMeterUI(cardEl, m){
    ============================================================ */
 function roBlock(it){
   if (it.kind === "image"){
-    const src = it.el.getAttribute("src") || "";
-    const alt = it.el.getAttribute("alt") || "";
+    const src = imageSrc(it);
+    const alt = it.bg ? "" : (it.el.getAttribute("alt") || "");
+    const where = it.bg
+      ? (it.bgSrc === "css" ? "set by a CSS rule — the new URL is written as an inline override"
+                            : "set inline on this element")
+      : "";
     return '<div class="ro"><span class="k">CURRENT IMAGE</span>' +
       (src ? '<img src="' + esc(src) + '" alt="" />' : '<i style="color:#5F584F">no src</i>') +
       '<div style="margin-top:6px">' + esc(src || "—") + '</div>' +
       (alt ? '<div style="margin-top:3px">alt: ' + esc(alt) + '</div>' : '') +
+      (where ? '<div style="margin-top:3px">background-image, ' + esc(where) + '</div>' : '') +
     '</div>';
   }
   if (it.kind === "action"){
@@ -1210,14 +1340,22 @@ function itemHTML(it, refKey){
         ' placeholder="New text…" value="' + esc(cur) + '" />';
   }
   else if (it.kind === "image"){
-    const src = it.el.getAttribute("src") || "";
-    const alt = it.el.getAttribute("alt") || "";
+    const src = imageSrc(it);
+    const alt = it.bg ? "" : (it.el.getAttribute("alt") || "");
     editBody =
       '<label class="lb">IMAGE URL</label>' +
       '<input type="text" data-f="src" value="' + esc(src) + '" placeholder="https://…  (drag the image into Squarespace to get the URL)" />' +
-      '<label class="lb">ALT TEXT</label>' +
-      '<input type="text" data-f="alt" value="' + esc(alt) + '" />' +
-      '<p class="note" style="margin:9px 0 0">Size and crop stay exactly as set in your CSS.</p>';
+      (it.bg ? '' :
+        '<label class="lb">ALT TEXT</label>' +
+        '<input type="text" data-f="alt" value="' + esc(alt) + '" />') +
+      '<p class="note" style="margin:9px 0 0">' +
+        (it.bg
+          ? 'This photo is a <b>background-image</b>' +
+            (it.bgSrc === "css"
+              ? ' set by a CSS rule. The new URL is written as an inline override on this element, so the stylesheet is never touched.'
+              : ' written inline on this element. Size, crop and position stay exactly as set.')
+          : 'Size and crop stay exactly as set in your CSS.') +
+      '</p>';
   }
   else {
     const t = it.el.textContent.trim().replace(/\s+/g," ");
@@ -1264,9 +1402,9 @@ function itemHTML(it, refKey){
    blow up the right rail. */
 function currentPreview(it){
   if (it.kind === "image"){
-    let src = it.el.getAttribute("src") || "(no src)";
+    let src = imageSrc(it) || "(no src)";
     if (src.length > 32) src = src.slice(0, 30) + "…";
-    return esc(src);
+    return (it.bg ? '<i class="empty">bg</i> ' : "") + esc(src);
   }
   let t = it.el.textContent.trim().replace(/\s+/g," ");
   if (!t) return '<i class="empty">(empty)</i>';
@@ -1506,8 +1644,13 @@ function applyField(it, inp){
     setTextPreserving(it.el, v);
   }
   else if (f === "src"){
-    if (v.trim()) it.el.setAttribute("src", v.trim());
-    else it.el.removeAttribute("src");
+    if (it.bg){
+      setBgImage(it, v.trim());
+    } else if (v.trim()){
+      it.el.setAttribute("src", v.trim());
+    } else {
+      it.el.removeAttribute("src");
+    }
   }
   else if (f === "alt"){
     it.el.setAttribute("alt", v);
@@ -1526,7 +1669,7 @@ function applyField(it, inp){
   const scope = inp.closest(".field-edit") || inp.closest(".item-body");
   if (scope){
     const ro = scope.querySelector(".ro");
-    if (ro && (f === "text" || f === "href" || f === "target")) ro.outerHTML = roBlock(it);
+    if (ro && (f === "text" || f === "href" || f === "target" || f === "src")) ro.outerHTML = roBlock(it);
   }
 
   dirty();

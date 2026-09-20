@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>dog-walk route card — background-photo fixture</title>
+</head>
+<body>
+<style>
+  .route-layout {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    gap: 24px;
+    font-family: Arial, Helvetica, sans-serif;
+    box-sizing: border-box;
+  }
+  .route-card {
+    position: relative;
+    border-radius: 20px;
+    overflow: hidden;
+    min-height: 600px;
+    background: #1f2937;
+  }
+  .route-img {
+    width: 100%;
+    height: 100%;
+    min-height: 600px;
+    background: #d1d5db;
+    background-size: cover;
+    background-position: center;
+  }
+  .route-overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.2) 40%, rgba(0,0,0,0) 60%);
+  }
+  .route-content {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 32px;
+    color: #fff;
+  }
+  .route-title {
+    font-size: 28px;
+    font-weight: 700;
+    margin: 0 0 24px;
+  }
+  .route-stats {
+    display: flex;
+    gap: 40px;
+    margin-bottom: 24px;
+  }
+  .stat-num {
+    font-size: 32px;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .stat-unit {
+    font-size: 16px;
+    font-weight: 400;
+  }
+  .stat-label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.8;
+    margin-top: 4px;
+  }
+  .route-bottom {
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+  }
+  .route-note {
+    flex: 1;
+    background: rgba(255,255,255,0.15);
+    backdrop-filter: blur(8px);
+    border-radius: 12px;
+    padding: 16px 20px;
+    font-size: 14px;
+    line-height: 1.5;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .route-note svg {
+    width: 16px;
+    height: 16px;
+    margin-top: 2px;
+    flex-shrink: 0;
+  }
+  .route-btn {
+    padding: 16px 20px;
+    background: rgba(255,255,255,0.2);
+    backdrop-filter: blur(8px);
+    border: none;
+    border-radius: 12px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: center;
+    line-height: 1.3;
+    white-space: nowrap;
+  }
+  .route-btn:hover { background: rgba(255,255,255,0.3); }
+  .right-col {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+  .update-card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 16px;
+    padding: 24px;
+  }
+  .update-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 8px;
+  }
+  .update-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #111827;
+    margin: 0;
+  }
+  .avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #d1d5db;
+    background-size: cover;
+    background-position: center;
+  }
+  .update-time {
+    font-size: 13px;
+    color: #6b7280;
+    margin-bottom: 16px;
+  }
+  .tag-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+  .tag {
+    padding: 6px 12px;
+    background: #f3f4f6;
+    border-radius: 8px;
+    font-size: 13px;
+    color: #4b5563;
+  }
+  .quote {
+    background: #f9fafb;
+    border-radius: 12px;
+    padding: 20px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #4b5563;
+    font-style: italic;
+    margin-bottom: 20px;
+  }
+  .update-footer {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: #6b7280;
+    padding-top: 16px;
+    border-top: 1px solid #f3f4f6;
+  }
+  .update-footer .avatar {
+    width: 24px;
+    height: 24px;
+  }
+  .photos-card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 16px;
+    padding: 24px;
+  }
+  .photos-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  .photos-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #111827;
+    margin: 0;
+  }
+  .view-all {
+    font-size: 14px;
+    color: #0d9488;
+    text-decoration: none;
+  }
+  .photos-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .photo-item {
+    aspect-ratio: 1;
+    border-radius: 10px;
+    background: #d1d5db;
+    background-size: cover;
+    background-position: center;
+  }
+  /* a photo whose url lives in the STYLESHEET, not in a style attribute */
+  .hero-photo {
+    height: 180px;
+    border-radius: 12px;
+    background-image: url('https://images.unsplash.com/photo-1558788353-f76d92427f16?w=600&q=80');
+    background-size: cover;
+    background-position: center;
+  }
+  /* a photo tile that is itself wrapped in a link */
+  .tile-photo {
+    height: 160px;
+    border-radius: 12px;
+    background-size: cover;
+    background-position: center;
+  }
+  @media (max-width: 768px) {
+    .route-layout {
+      grid-template-columns: 1fr !important;
+      display: block !important;
+    }
+    .route-card {
+      min-height: 700px !important;
+      margin-bottom: 20px;
+    }
+    .route-img {
+      min-height: 700px !important;
+    }
+    .route-overlay {
+      background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.4) 50%, rgba(0,0,0,0) 70%);
+    }
+    .route-content {
+      padding: 20px;
+    }
+    .route-title {
+      font-size: 22px;
+    }
+    .route-stats {
+      gap: 20px;
+    }
+    .stat-num {
+      font-size: 24px;
+    }
+    .stat-label {
+      font-size: 10px;
+    }
+    .route-bottom {
+      flex-direction: column;
+    }
+    .route-btn {
+      width: 100%;
+    }
+    .right-col {
+      display: block !important;
+    }
+    .update-card, .photos-card {
+      margin-bottom: 20px;
+    }
+  }
+</style>
+
+<div class="route-layout">
+
+  <!-- left: the big route card -->
+  <div class="route-card">
+    <div class="route-img" style="background-image: url('https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=1200&q=80');">
+    </div>
+    <div class="route-overlay"></div>
+    <div class="route-content">
+      <h2 class="route-title">Today's Route (Demo)</h2>
+      <div class="route-stats">
+        <div>
+          <div><span class="stat-num">58</span> <span class="stat-unit">min</span></div>
+          <div class="stat-label">Duration</div>
+        </div>
+        <div>
+          <div><span class="stat-num">2.7</span> <span class="stat-unit">mi</span></div>
+          <div class="stat-label">Distance</div>
+        </div>
+        <div>
+          <div><span class="stat-num">21'28"</span> <span class="stat-unit">/mi</span></div>
+          <div class="stat-label">Avg Pace</div>
+        </div>
+      </div>
+      <div class="route-bottom">
+        <div class="route-note">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="16" x2="12" y2="12"></line>
+            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+          </svg>
+          Otis sniffed a lot today - energy was happy and steady. Water break at minute 2.
+        </div>
+        <button class="route-btn">Report<br>an issue</button>
+        <button class="route-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline-block;vertical-align:middle;margin-right:4px;">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          Recap
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- right column -->
+  <div class="right-col">
+
+    <div class="update-card">
+      <div class="update-header">
+        <h3 class="update-title">Daily Update</h3>
+        <div class="avatar" style="background-image: url('https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&q=80');"></div>
+      </div>
+      <div class="update-time">Tue, Jan 13, 2026 - 9:12 AM</div>
+      <div class="tag-row">
+        <span class="tag">Mood: Calm</span>
+        <span class="tag">Potty: 1 poop - 1 pee</span>
+        <span class="tag">Ate: Yes</span>
+      </div>
+      <div class="quote">
+        "Otis started a little cautious, then warmed up quickly. One brief leash pull near scooters - redirected easily. No signs of discomfort. Paws look good."
+      </div>
+      <div class="update-footer">
+        <div class="avatar" style="background-image: url('https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&q=80');"></div>
+        <span>Update by Maya Thompson</span>
+      </div>
+    </div>
+
+    <div class="photos-card">
+      <div class="photos-header">
+        <h3 class="photos-title">Quick Photos</h3>
+        <a href="#" class="view-all">View All</a>
+      </div>
+      <div class="photos-grid">
+        <div class="photo-item" style="background-image: url('https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400&q=80');"></div>
+        <div class="photo-item" style="background-image: url('https://images.unsplash.com/photo-1583337130417-3346a1be7dee?w=400&q=80');"></div>
+        <div class="photo-item" style="background-image: url('https://images.unsplash.com/photo-1552053831-71594a27632d?w=400&q=80');"></div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<!-- a photo whose url comes from a STYLESHEET rule (class-driven) -->
+<div class="hero-photo"></div>
+
+<!-- a linked photo tile: the photo sits INSIDE the <a> -->
+<a class="tile-link" href="/gallery"><div class="tile-photo" style="background-image: url('https://images.unsplash.com/photo-7777777777777-cccccccccccc?w=400&q=80');"></div></a>
+
+<!-- and a plain <img>, to prove the classic path still works -->
+<img class="real-img" src="https://images.unsplash.com/photo-1601758228041-f3b2795255f1?w=400&q=80" alt="a dog" width="240" />
+
+</body>
+</html>

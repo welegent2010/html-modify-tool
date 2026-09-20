@@ -14,7 +14,7 @@ Left to right:
 
 - **HTML MODIFY TOOL** — product name.
 - **filename** — the file you currently have open (`no file` before you load anything).
-- **build version** — a permanent gold badge (currently `v6.6`) so a screenshot always tells you which build you are looking at.
+- **build version** — a permanent gold badge (currently `v6.7`) so a screenshot always tells you which build you are looking at.
 - **status** — the transient state: `READY`, `RENDERING…`, `UNSAVED…`, `SAVED 12:09:41`, `SAVE FAILED`. It turns gold when there is unsaved work.
 - **PASTE / OPEN FILE / EXPORT / RESET** — the four actions. EXPORT and RESET stay disabled until a document is loaded.
 
@@ -42,13 +42,27 @@ For each block the right pane shows up to four kinds of item. Each one starts **
 | Chip        | Collapsed row          | Editor (on click)                                        |
 |-------------|------------------------|----------------------------------------------------------|
 | `TEXT`      | badge · current text   | A single-line box with a `used / max` counter. Long values scroll sideways rather than growing the panel. |
-| `IMAGE`     | badge · current text   | `src` + `alt`. Size, crop and CSS are kept.               |
+| `IMAGE`     | badge · current text   | The picture URL (plus `alt` when the picture is a real `<img>`). Size, crop and CSS are kept. |
 | `ACTION`    | badge · link label     | Button text and link target, with an "open in new tab" toggle. |
 | `INDICATOR` | appears inside the editor of a `TEXT` chip that carries a row of small bars | lit count |
 
 Every text field also carries a **character budget** — see below.
 
 Only one chip is open at a time — clicking another closes the first, so the pane never grows into a wall of forms.
+
+**A picture is a picture, `<img>` or not.** Photos are very often a CSS background rather than an `<img>`:
+
+```html
+<div class="route-img" style="background-image:url('…')"></div>
+<div class="avatar"></div>            <!-- .avatar { background-image: url(…) } -->
+```
+
+A rendered box with no text of its own whose background holds a `url()` is an `IMAGE` chip like any other — its chip shows a small `bg` marker. Gradients are ignored (a gradient is not a photo), and so are content cards, translucent panels and hairline spacers. Where the URL is written back matters, and the editor picks the right place by itself:
+
+- **inline** (`background-image`, or the `background` shorthand) — edited in place, so extra layers, position and size survive untouched. A `background: url(a), linear-gradient(…)` keeps its gradient.
+- **a CSS rule** — a single inline override is written on that one element. **The stylesheet is never modified**, which keeps the "content edits only" promise intact.
+
+A background photo has no `alt` attribute, so the ALT field is hidden for it rather than offered and ignored.
 
 **One chip per field, not per element.** A card whose fields are stacked on separate lines gets one chip each — a timetable slot shows three (`09:00`, `Vinyasa Flow`, `Maya`), a pricing box shows two (`$120`, `/ session`). Editing one never touches its neighbours: no merging, no lost lines, no inherited fonts.
 
@@ -220,9 +234,17 @@ The editor works for ~95% of static pages. It does not handle:
 1. **Shadow DOM contents.** Pages that render text inside a `<template>` or a custom element with an open shadow root will appear empty in the right pane. You can still edit them by hand.
 2. **Canvas / SVG text.** `<canvas>` and inline `<svg><text>` are skipped by design.
 3. **`<input>` / `<textarea>` inside the page.** Forms are read-only markers — the tool will not try to edit a search bar or a newsletter field, only the static content around it.
-4. **Sections with no visible text and no images.** If a section is purely a decorative gradient, it will not appear in the section strip.
-5. **Two open tabs editing the same page.** `localStorage` is shared across tabs; the last writer wins. Use one tab at a time.
-6. **Pages larger than ~2 MB.** The initial scan takes longer. No hard limit, just slower.
+4. **Sections with nothing in them.** A block that is purely decorative — a gradient, a solid
+   colour, an empty spacer, a box with no text and no picture — does not appear in the section
+   strip. A block holding a background **photo** does, from v6.7 on.
+5. **Pictures that are not `<img>` or `background-image`.** A photo drawn with `<svg><image>`,
+   with a CSS `content: url(…)` pseudo-element, or a `<canvas>` is skipped, like all other SVG.
+6. **Background photos inside a `@media` override.** v6.7 writes an inline override when the URL
+   comes from a CSS rule, and an inline value wins at every breakpoint — so if a rule sets a
+   *different* photo on mobile, that one will be overridden too. Inline-authored photos (the
+   common case) are unaffected.
+7. **Two open tabs editing the same page.** `localStorage` is shared across tabs; the last writer wins. Use one tab at a time.
+8. **Pages larger than ~2 MB.** The initial scan takes longer. No hard limit, just slower.
 7. **Tailwind Play CDN unreachable.** If the page you load depends on `https://cdn.tailwindcss.com` and the CDN is down, the preview renders unstyled for the first ~6 seconds. After 6 seconds the scan falls back to whatever markup has arrived. The editor itself is unaffected.
 8. **Indicator rows drawn with SVG.** If the bars are `<rect>` elements inside an inline `<svg>` instead of ordinary elements, the tool cannot see them — `<svg>` subtrees are skipped by design.
 9. **Indicator rows that load with zero lit bars.** The lit look is learned from a bar that is
@@ -238,27 +260,32 @@ The editor works for ~95% of static pages. It does not handle:
 ```
 html modify tool/
 ├── html-editor.html           # the editor — the only file you ship
-├── html-editor.v6-stable.html # frozen snapshot of the v6.0 release
 ├── README.md                  # this file
-├── dev-regression-test.js     # Playwright tests, developer-only (44 assertions)
-├── dev-test-text-replace.js   # "  (32)  text replacement, hover-swap, icons
-├── dev-test-meter.js          # "  (50)  indicator rows
-├── dev-test-timetable.js      # "  (35)  multi-line span stacks + a real page
-├── dev-test-collapse.js       # "  (28)  collapsed field chips, one editor open at a time
-├── dev-test-hover-swap.js     # "  (14)  hover-swap labels stay in sync
-├── dev-test-budget.js         # "  (22)  character budgets, multi-line labels, no reflow
-├── _audit-v66.js              # split audit across all 15 real pages
-├── html/                      # sample inputs (drop your own files here)
-│   ├── _example-hero.html
+├── html/                      # working pages — drop the files you want to edit here
+│   └── site-files/            # a real Squarespace export (sample material)
+├── tests/                     # developer-only regression suite, needs Playwright
+│   ├── run-all.sh             # runs every suite in order
+│   ├── dev-regression-test.js # (44)  real Squarespace pages, section/card model, export
+│   ├── dev-test-text-replace.js # (32)  text replacement, hover-swap, icons
+│   ├── dev-test-meter.js      # (50)  indicator rows
+│   ├── dev-test-timetable.js  # (35)  multi-line span stacks + a real page
+│   ├── dev-test-collapse.js   # (28)  collapsed field chips, one editor open at a time
+│   ├── dev-test-hover-swap.js # (14)  hover-swap labels stay in sync
+│   ├── dev-test-budget.js     # (22)  character budgets, multi-line labels, no reflow
+│   ├── dev-test-bg-image.js   # (42)  background-image photos, CSS untouched
+│   ├── _audit-v66.js          # split audit across all 15 real pages
+│   ├── _audit-v67.js          # picture audit — <img> vs background photos, per page
+│   ├── _example-hero.html     # fixtures: one per suite
 │   ├── _dev-text-replace.html
-│   ├── _dev-seats.html        # seats indicator sample (all four techniques + a decoy)
-│   ├── _dev-timetable.html    # stacked-span fields + a hover-swap button
-│   └── site-files/            # a real Squarespace export
+│   ├── _dev-seats.html        #   seats indicator sample (all four techniques + a decoy)
+│   ├── _dev-timetable.html    #   stacked-span fields + a hover-swap button
+│   └── _dev-bg-image.html     #   background-image photos: inline, CSS-rule, inside a link
 └── output/                    # exports land here
 ```
 
-`dev-*.js` files need Playwright and are not part of the editor. Everything the editor itself
-needs is inside `html-editor.html`.
+`tests/` is not part of the editor — everything the editor itself needs is inside
+`html-editor.html`. Fixtures live next to the suite that uses them; the only path that
+points outside `tests/` is `../html/site-files/`, the sample Squarespace export.
 
 ---
 
@@ -275,26 +302,25 @@ A single blocked image (e.g. a 404 on a remote CDN) makes the `load` event never
 ### Run the regression suite
 
 ```bash
-# Playwright must be installed first (one-time)
-# see the header of each dev-test-*.js for the binary path
+# Playwright must be installed first (one-time) — see tests/run-all.sh for the binary path
 
-node dev-regression-test.js      # 44 assertions — real Squarespace pages, section/card model,
-                                 #   document switching, export integrity, RESET
-node dev-test-text-replace.js    # 32 assertions — text replacement across tricky markup shapes
-node dev-test-meter.js           # 50 assertions — indicator rows (4 techniques + a decoy)
-node dev-test-timetable.js       # 35 assertions — stacked-span fields stay separate fields
-node dev-test-collapse.js        # 28 assertions — chip collapse contract (one open at a time)
-node dev-test-hover-swap.js      # 14 assertions — hover-swap buttons keep BOTH labels in sync
-                                 #   (transform-based, opacity-based, three-label variants)
-node dev-test-budget.js          # 22 assertions — per-field character budgets, a two-line logo
-                                 #   survives, <br> labels, no reflow, export stays clean
+sh tests/run-all.sh                          # all eight suites
+sh tests/run-all.sh dev-test-budget.js       # or a single one
 ```
 
-All seven run green across repeated runs — 225 assertions.
+All eight run green across repeated runs — 267 assertions.
 
 The character budget makes a field refuse over-long edits, so a fixture that stuffs an 18-character
 string into a 12-character title box will silently lose the tail. Keep test payloads inside the
 field's budget (the suites assert `maxlength` first).
+
+Two traps when driving the editor from a test:
+
+- A field's input is destroyed when the panel re-renders (opening another chip does this), and
+  Chrome fires `change` on the way out — which re-writes that field. Set a "final" value through
+  the UI, not by reaching into the DOM behind the editor's back, or it will be overwritten.
+- Nothing is detected inside a zero-sized box, so a fixture photo box needs a height in CSS.
+  A `background-image` div with no height renders 0px tall and is correctly skipped.
 
 Three throwaway audits worth repeating whenever the scanner changes:
 
@@ -304,6 +330,10 @@ Three throwaway audits worth repeating whenever the scanner changes:
   changes across all 15 pages** — the recursive rule only fires on the two-line logo.
 - **indicator scan** — run `findBarRow()` over every element of every page and count hits; the
   answer must be 0 on real content. v6.3 re-checked all 14 pages: 0.
+- **picture audit** (`_audit-v67.js`) — per page, how many `IMAGE` items are `<img>` and how many
+  are background photos. **v6.7 measured the real export: 93 `<img>`, 0 background photos.** That
+  is the point — the Aura/Squarespace pages were already fine, so the new rule is purely additive
+  and cannot change any existing page's item list. It is the hand-written layouts that need it.
 
 ---
 
@@ -362,10 +392,35 @@ This project uses simple `MAJOR.MINOR` versioning.
 
   Cumulative test suite: from v6.0's 35 single-suite run to **225 assertions across 7 suites** —
   regression 44, text-replace 32, meter 50, timetable 35, collapse 28, hover-swap 14, budget 22.
+- **v6.7** — "images I can't reach". `scan()` only ever looked for `<img>`, so every layout that
+  puts its photos in CSS exposed **zero** images: the pictures were on screen and absent from the
+  panel, with no way to swap a URL.
+
+  ```html
+  <div class="route-img" style="background-image:url('…')"></div>
+  <div class="avatar"></div>          <!-- .avatar { background-image: url(…) } -->
+  ```
+
+  - A **picture box** — rendered, no text of its own, no `<img>`/`<svg>`/`<video>` inside, and a
+    `url()` in its background — is now an `IMAGE` chip. Gradients are not photos; neither are
+    translucent panels, content cards or 0-height spacers.
+  - The write-back respects **where the URL lives**: an inline value is edited in place, so a
+    shorthand keeps its extra layers, its position and its size; a class-driven one gets a single
+    inline override and **the stylesheet is never touched**.
+  - A `background-image` has no `alt`, so the ALT field is hidden instead of offered and ignored.
+  - Two structural gaps came out of the same bug: a section whose root **is** the picture box
+    (`<img>` or a photo div sitting directly on the body) was never scanned, because
+    `scanSection()` only walked children — and a photo box has none. And the section gate required
+    text or an `<img>`, so `<div class="hero-photo"></div>` was filtered out before anything could
+    look at it.
+
+  Cumulative test suite: **267 assertions across 8 suites** — the seven above plus
+  bg-image 42. `_audit-v67.js` measures the split per page: the real export has 93 `<img>` and
+  **0** background photos, i.e. this change is purely additive on existing pages.
 
 Breaking changes to the editor file (renamed UI elements, changed export format, new mandatory
-dependencies) will bump the major version and ship as a new release. The `.v6-stable.html` snapshot
-keeps working forever.
+dependencies) will bump the major version and ship as a new release. Every release is tagged on
+GitHub, so any past version stays one `git checkout v6.6` away.
 
 ---
 

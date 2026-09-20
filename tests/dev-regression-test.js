@@ -6,7 +6,8 @@
 const { chromium } = require("/Users/xiaodongwang/.workbuddy/binaries/node/workspace/node_modules/playwright");
 
 const TOOL = "file:///Users/xiaodongwang/Documents/pptprofilo/do/workbaddy/html/html modify tool/html-editor.html";
-const DIR = "/Users/xiaodongwang/Documents/pptprofilo/do/workbaddy/html/html modify tool/html/";
+const DIR  = "/Users/xiaodongwang/Documents/pptprofilo/do/workbaddy/html/html modify tool/html/"; // 站点素材 site-files/
+const HERE = __dirname + "/";                                                                    // 测试 fixture
 
 let pass = 0, fail = 0;
 function ok(cond, msg) {
@@ -38,7 +39,7 @@ async function waitForSecs(page, n, timeout = 14000) {
   await page.waitForTimeout(500);
 
   console.log("\n=== A. Sample hero (no cards) ===");
-  await page.locator("#fileInput").setInputFiles(DIR + "_example-hero.html");
+  await page.locator("#fileInput").setInputFiles(HERE + "_example-hero.html");
   await waitForSecs(page, 1);
   await page.waitForTimeout(500);
   ok(await page.locator(".sec").count() > 0, "sections detected");
@@ -178,7 +179,7 @@ async function waitForSecs(page, n, timeout = 14000) {
   console.log("\n=== K. rapid document switching ===");
   await page.locator("#fileInput").setInputFiles(DIR + "site-files/classes.html");
   const n1 = await waitForSecs(page, 7);
-  await page.locator("#fileInput").setInputFiles(DIR + "_example-hero.html");
+  await page.locator("#fileInput").setInputFiles(HERE + "_example-hero.html");
   const n2 = await waitForSecs(page, 1);
   await page.locator("#fileInput").setInputFiles(DIR + "site-files/index.html");
   const n3 = await waitForSecs(page, 1);

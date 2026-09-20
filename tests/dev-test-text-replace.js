@@ -10,7 +10,7 @@
 const { chromium } = require("playwright");
 
 const EDITOR = "file:///Users/xiaodongwang/Documents/pptprofilo/do/workbaddy/html/html%20modify%20tool/html-editor.html";
-const FIXTURE = __dirname + "/html/_dev-text-replace.html";
+const FIXTURE = __dirname + "/_dev-text-replace.html";
 
 let pass = 0, fail = 0;
 function ok(cond, msg) {

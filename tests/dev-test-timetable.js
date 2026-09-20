@@ -23,8 +23,8 @@ const { chromium } = require("/Users/xiaodongwang/.workbuddy/binaries/node/works
 const { pathToFileURL } = require("url");
 
 const EDITOR  = pathToFileURL("/Users/xiaodongwang/Documents/pptprofilo/do/workbaddy/html/html modify tool/html-editor.html").href;
-const FIXTURE = __dirname + "/html/_dev-timetable.html";
-const SITE    = __dirname + "/html/site-files/";
+const FIXTURE = __dirname + "/_dev-timetable.html";
+const SITE    = __dirname + "/../html/site-files/";
 
 let pass = 0, fail = 0;
 function ok(cond, msg) {

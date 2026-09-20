@@ -2,7 +2,7 @@
 const { chromium } = require("/Users/xiaodongwang/.workbuddy/binaries/node/workspace/node_modules/playwright");
 const { pathToFileURL } = require("url");
 const EDITOR = pathToFileURL("/Users/xiaodongwang/Documents/pptprofilo/do/workbaddy/html/html modify tool/html-editor.html").href;
-const FIXTURE = "/Users/xiaodongwang/Documents/pptprofilo/do/workbaddy/html/html modify tool/html/_dev-hover-swap.html";
+const FIXTURE = __dirname + "/_dev-hover-swap.html";
 
 let passed = 0, failed = 0;
 const ok = (cond, msg) => {
